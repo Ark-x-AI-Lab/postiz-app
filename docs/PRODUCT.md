@@ -43,3 +43,5 @@ Build evidence: [source image and private-context checks](https://github.com/Ark
 ## Deployment delivery
 
 The maintained fork builds its commit-tagged image in GitHub Actions and Coolify pulls that exact image. Production keys are runtime-only. The image must pass an offline, read-only Prisma tool check before publication. The existing publisher remains live while database upgrade, recovery and replacement readiness are tested.
+
+The private registry login is separate from the shared server login. Provider credentials belong to the publisher’s declared environment; infrastructure does not inherit the publisher’s global environment file. Default deployment startup continues to exclude the publisher until its explicit activation step.
