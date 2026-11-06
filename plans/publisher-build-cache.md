@@ -1,6 +1,6 @@
 # Publisher dependency-download cache
 
-Status: local preparation; no cold/warm build or speedup established.
+Status: dependency-cache reuse and repaired native image checks passed on hosted runners; not deployed. Only the package-download stage has a measured reuse benefit.
 
 The source image currently installs dependencies after every included source change. The next recipe separates locked package downloads from application source, then keeps workspace installation, explicitly rebuilds the two approved native packages, and retains Prisma generation and compilation after the source copy. Node22.23.4, pnpm10.6.1, Linux/amd64 and dependency build approvals remain unchanged.
 
@@ -18,8 +18,13 @@ Only a dependency-stage cache is exported to GitHub Actions. It includes build t
 
 References: [pnpm10 fetch](https://pnpm.io/10.x/cli/fetch), [Docker GitHub Actions cache](https://docs.docker.com/build/cache/backends/gha/). Cache confidentiality, quotas/eviction and the actual cold/warm results remain part of acceptance; no guaranteed build-time or cost reduction is claimed.
 
-Cheap pinned checks passed under Node22.23.4/pnpm10.6.1: fetch accepts the chosen options and skips the synthetic project hook; offline install runs that hook; an empty-store package install fails specifically with the offline-package-missing error. This is option/hook/refusal proof, not cold/warm performance. A D7 baseline probe found bcrypt/sharp load but canvas lacks its native binding; that separate existing compatibility gap remains open before final native acceptance.
+Cheap pinned checks passed under Node22.23.4/pnpm10.6.1: fetch accepts the chosen options and skips the synthetic project hook; offline install runs that hook; an empty-store package install fails specifically with the offline-package-missing error. This is option/hook/refusal proof, not cold/warm performance. A D7 baseline probe found bcrypt/sharp load but canvas lacks its native binding; that baseline compatibility gap was subsequently closed by the repaired-image acceptance below.
 
 ## Observed lifecycle correction
 
-The initial cold image build passed, and a later fresh runner reported the fetch instruction cached. The new native gate then correctly blocked publication for missing canvas. A separate pinned dependency fixture proved why normal offline install alone was insufficient: the approved dependency hook stayed pending despite two successful commands. Named rebuild fixes that case while respecting the approval list and leaving the root project hook at one execution. The recipe now explicitly rebuilds only `bcrypt` and `canvas` after offline installation. The repaired actual image must still pass all native tests; this fixture is not canvas acceptance.
+The initial cold image build passed, and a later fresh runner reported the fetch instruction cached. The new native gate then correctly blocked publication for missing canvas. A separate pinned dependency fixture proved why normal offline install alone was insufficient: the approved dependency hook stayed pending despite two successful commands. Named rebuild fixes that case while respecting the approval list and leaving the root project hook at one execution. The recipe now explicitly rebuilds only `bcrypt` and `canvas` after offline installation. The repaired actual image at source `46d20f2929679c4db740b1f8b20b20be0bf8173c` passed all seven native/content tests and 152 existing connector/registration tests in [run 42301401305](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42301401305). This is actual image acceptance, separate from the synthetic hook fixture.
+
+
+## Measured scope
+
+The first dependency-cache step took 236 seconds. A fresh runner on the later source-only gate commit reused the fetch instruction and completed that step in 3 seconds. Full source compilation took 382 seconds cold and 398 seconds on that later run, so no whole-build speedup is established. The deliberately failing canvas gate blocked publication on that intermediate run; the final repaired source then passed and published its commit image. Production source, credentials and running services remain unchanged.
