@@ -94,3 +94,11 @@ Coolify 4.6.0 adds the root `.env` file to every generated service. `start-stack
 Default startup clears inherited `COMPOSE_PROFILES` and creates infrastructure only. Deliberate publisher activation additionally requires `ARKX_RUNTIME=production bash deploy/arkx/start-stack.sh --activate-publisher`; the application’s own exact runtime guard remains independent. Do not activate before restored-data, recovery and single-publisher checks pass. Image selection reads only the public commit field from Coolify’s generated environment file; build and runtime credential values are never sourced into the shell.
 
 `check-temporal.cjs` checks namespace readiness and the two required Text attributes, with an explicit `--register-missing` operator action. `check-backend.cjs` accepts only the API key through stdin and checks the private backend’s allowed/denied API-key cases, integration count and registration setting. Session-token testing is separate because upstream session middleware can write a missing organization API key even for a GET request. Neither helper publishes.
+
+## Image capacity
+
+The runtime recipe now uses a separate final stage: all application dependencies and compiled output are retained, while compiler-stage layers and the verified frontend Turbopack build cache stay out of the delivered image. Native runtime libraries, pnpm/PM2 shims, nginx and existing startup behavior remain. Runtime and size proof for this recipe are pending the next CI build.
+
+Do not use `docker image inspect .Size` alone as a disk-capacity estimate with the current containerd image store: observed content size was about 1.6 GB while actual image disk use was about 6.9 GB. CI now streams `docker image save` into a byte count without saving another archive. The default uncompressed archive budget is 5,000,000,000 bytes; administrators can set the Actions variable `ARKX_MAX_IMAGE_ARCHIVE_BYTES` after reviewing host capacity. A pull still needs extra room for compressed content and healthy database operation. Recheck target disk capacity before deploying.
+
+The removed `.next/cache/turbopack` directory held 572 MB in the previous image; compiled `.next/server` and `.next/static` are preserved. [Next.js documents `.next/cache` as shared build cache](https://nextjs.org/docs/pages/guides/ci-build-caching). No production dependency pruning is performed.

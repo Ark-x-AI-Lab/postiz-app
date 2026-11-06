@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_COMMIT: ${{ github.sha }}
+      MAX_IMAGE_ARCHIVE_BYTES: ${{ vars.ARKX_MAX_IMAGE_ARCHIVE_BYTES || '5000000000' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check deployment definitions
@@ -84,6 +85,19 @@ jobs:
             --cap-drop=ALL --security-opt no-new-privileges --entrypoint node "$IMAGE" \
             /app/deploy/arkx/prepare-compose.cjs < "$RUNNER_TEMP/injected-compose.json" > "$RUNNER_TEMP/prepared-compose.json"
           python3 -c "import json; assert json.load(open('$RUNNER_TEMP/prepared-compose.json')) == json.load(open('deploy/arkx/compose.production.yaml'))"
+      - name: Check runtime tools and final image payload
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          docker run --rm --network none --read-only --user 65534:65534 --entrypoint pnpm "$IMAGE" --version
+          docker run --rm --network none --read-only --user 65534:65534 --entrypoint nginx "$IMAGE" -v
+          docker run --rm --network none --read-only --user 65534:65534 --entrypoint node "$IMAGE" -e "const fs=require('node:fs'); fs.accessSync('/usr/local/bin/pm2',fs.constants.X_OK); if(fs.existsSync('/app/apps/frontend/.next/cache/turbopack')) throw new Error('Build cache shipped'); for(const p of ['/app/apps/frontend/.next/server','/app/apps/frontend/.next/static']) if(!fs.existsSync(p)) throw new Error('Compiled frontend missing'); require('/usr/local/lib/node_modules/pm2/package.json'); require('@temporalio/worker'); require('sharp'); console.log('RUNTIME_MODULES_OK');"
+          set -o pipefail
+          bytes=$(docker image save "$IMAGE" | wc -c)
+          bytes=$(echo "$bytes" | tr -d '[:space:]')
+          [[ "$bytes" =~ ^[0-9]+$ && "$MAX_IMAGE_ARCHIVE_BYTES" =~ ^[1-9][0-9]+$ ]]
+          printf 'IMAGE_ARCHIVE_BYTES=%s MAX_IMAGE_ARCHIVE_BYTES=%s\n' "$bytes" "$MAX_IMAGE_ARCHIVE_BYTES"
+          test "$bytes" -le "$MAX_IMAGE_ARCHIVE_BYTES"
       - name: Publish the commit image to GitHub Container Registry
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
