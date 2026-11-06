@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 REQUIRED = re.compile(r"\$\{([A-Z][A-Z0-9_]*):\?[^}]+\}")
+APP_IMAGE_PREFIX = "ghcr.io/ark-x-ai-lab/postiz-app:sha-"
 IMAGES = {
     "postiz-postgres": "postgres:14.5",
     "postiz-redis": "redis:7.2",
@@ -41,6 +42,12 @@ def load(mode):
 
 def names(mode):
     return set(REQUIRED.findall(json.dumps(load(mode))))
+
+
+def pinned_app_image(source_commit):
+    need(re.fullmatch(r"[0-9a-f]{40}", source_commit) is not None,
+         "SOURCE_COMMIT must be a full 40-character lowercase hexadecimal commit SHA")
+    return APP_IMAGE_PREFIX + source_commit
 
 
 def static_checks():
@@ -72,8 +79,9 @@ def static_checks():
     need(app["profiles"] == ["production"], "Publisher profile guard missing")
     need(app["expose"] == ["5000"], "App internal port must be 5000")
     need(app["command"] == ["sh", "/app/deploy/arkx/runtime-start.sh"], "Startup guard missing")
-    need(app["build"] == {"context": ".", "dockerfile": "Dockerfile.dev", "args": {"NEXT_PUBLIC_VERSION": "v2.25.3"}},
-         "Build must use unchanged source Dockerfile with only public version argument")
+    need("build" not in app, "Deployment must pull the pinned application image, never build it")
+    need(re.fullmatch(re.escape(APP_IMAGE_PREFIX) + r"\$\{SOURCE_COMMIT:\?[^}]+\}", app.get("image", "")) is not None,
+         "Application image must use the fixed GHCR namespace and required SOURCE_COMMIT tag")
     need(app["environment"]["DISABLE_REGISTRATION"] == "true", "Registration must be disabled")
     need(OAUTH <= set(app["environment"]), "Selected provider settings missing")
     for key in OAUTH | {"JWT_SECRET", "ARKX_RUNTIME"}:
@@ -126,50 +134,35 @@ def compose_path_checks(env):
             path = nested / f"compose.{mode}.yaml"
             path.write_text(json.dumps(data))
 
-            def render(project, *options):
+            def render(project):
                 return subprocess.run(
                     ["docker", "compose", "-f", str(path), "--env-file", str(root / ".env"),
                      "--project-directory", str(project), "--profile", "production",
-                     "config", "--format", "json", *options],
+                     "config", "--format", "json"],
                     cwd=root, env=env, capture_output=True, text=True)
 
-            result = render(root, "--no-env-resolution")
-            need(result.returncode == 0, f"Root {mode} path normalization failed")
+            # Compose versions differ in whether config retains env_file metadata.
+            # Prove loading through every service's effective environment instead.
+            result = render(root)
+            need(result.returncode == 0, f"Root {mode} generated env_file resolution failed")
             services = json.loads(result.stdout)["services"]
+            need(set(services) == set(data["services"]), f"Root {mode} fixture service set changed")
             for name, service in services.items():
-                files = service["env_file"]
-                need(len(files) == 1 and files[0]["path"] == str(root / ".env")
-                     and files[0].get("required", True) is True,
-                     f"Root {mode}/{name} env_file resolved outside checkout root")
+                need(service.get("environment", {}).get("ARKX_PATH_PROBE") == "synthetic-validation-only",
+                     f"Root {mode}/{name} generated env_file was not loaded")
             mount = next(v for v in services["temporal"]["volumes"]
                          if v["target"] == "/etc/temporal/config/dynamicconfig")
             need(mount["type"] == "bind" and mount["source"] == str(dynamic)
                  and mount["read_only"] is True, f"Root {mode} dynamic configuration bind is wrong")
             if mode == "production":
-                need(services["postiz"]["build"]["context"] == str(root),
-                     "Root source build context is not the checkout root")
-            result = render(root)
-            need(result.returncode == 0, f"Root {mode} generated env_file resolution failed")
-            need(all(s["environment"].get("ARKX_PATH_PROBE") == "synthetic-validation-only"
-                     for s in json.loads(result.stdout)["services"].values()),
-                 f"Root {mode} generated env_file was not loaded for every service")
-            result = render(nested, "--no-env-resolution")
-            need(result.returncode == 0, f"Nested {mode} negative-control normalization failed")
-            services = json.loads(result.stdout)["services"]
-            need(all(s["env_file"][0]["path"] == str(nested / ".env") for s in services.values()),
-                 f"Nested {mode} did not reproduce the wrong env_file base")
-            mount = next(v for v in services["temporal"]["volumes"]
-                         if v["target"] == "/etc/temporal/config/dynamicconfig")
-            need(mount["source"] == str(nested / "deploy/arkx/dynamicconfig"),
-                 f"Nested {mode} did not reproduce the wrong bind base")
-            if mode == "production":
-                need(services["postiz"]["build"]["context"] == str(nested),
-                     "Nested negative control did not reproduce the wrong build context")
+                app = services["postiz"]
+                need("build" not in app and app["image"] == pinned_app_image(env["SOURCE_COMMIT"]),
+                     "Root application image is not the pinned source commit")
             result = render(nested)
             need(result.returncode != 0 and str(nested / ".env") in result.stderr
                  and "no such file" in result.stderr.lower(),
                  f"Nested {mode} must reject missing generated env_file")
-    print("PASS: both Coolify-generated env_file fixtures resolve from repository root; build/bind/env_file paths match; nested project directory fails on missing .env")
+    print("PASS: both Coolify-generated env_file fixtures load all 15 service markers from repository root; pinned image and bind paths match; nested project directory fails on missing .env")
 
 
 def compose_checks():
@@ -179,7 +172,11 @@ def compose_checks():
     env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""), "COMPOSE_PROFILES": ""}
     for key in names("production"):
         env[key] = "synthetic-validation-only"
-    env.update(ARKX_CANDIDATE_ID="validation-only", ARKX_RUNTIME="production")
+    env.update(ARKX_CANDIDATE_ID="validation-only", ARKX_RUNTIME="production", SOURCE_COMMIT="0" * 40)
+    result = subprocess.run(["docker", "compose", "version", "--short"],
+                            env=env, capture_output=True, text=True)
+    need(result.returncode == 0, "Docker Compose version lookup failed")
+    print(f"Docker Compose version: {result.stdout.strip()}")
     for mode in ("rehearsal", "production"):
         result = compose(mode, env, "config", "--format", "json")
         need(result.returncode == 0, f"Compose {mode} rendering failed (output withheld)")
@@ -189,6 +186,14 @@ def compose_checks():
         need(result.returncode == 0, f"Compose {mode} profile rendering failed")
         services = json.loads(result.stdout)["services"]
         need(("postiz" in services) == (mode == "production"), "Publisher profile isolation failed")
+        if mode == "production":
+            app = services["postiz"]
+            need("build" not in app and app["image"] == pinned_app_image(env["SOURCE_COMMIT"]),
+                 "Production profile must select the pinned source image without a build")
+            missing_commit = dict(env)
+            del missing_commit["SOURCE_COMMIT"]
+            result = compose(mode, missing_commit, "--profile", "production", "config", "--quiet")
+            need(result.returncode != 0, "Missing SOURCE_COMMIT accepted by production Compose")
         blocked_env = dict(env)
         del blocked_env["POSTGRES_PASSWORD" if mode == "rehearsal" else "JWT_SECRET"]
         result = compose(mode, blocked_env, "config", "--quiet")
@@ -208,6 +213,7 @@ def environment_checks(mode, check_new):
     for key in ("POSTGRES_PASSWORD", "TEMPORAL_POSTGRES_PASSWORD"):
         need(re.fullmatch(r"[A-Za-z0-9_-]{32,}", os.environ[key]) is not None, f"Use at least 32 random URL-safe characters for {key}")
     if mode == "production":
+        pinned_app_image(os.environ["SOURCE_COMMIT"])
         need(os.environ["ARKX_RUNTIME"] == "production", "ARKX_RUNTIME must equal production")
         url = urlsplit(os.environ["ARKX_PUBLIC_URL"])
         need(url.scheme == "https" and bool(url.hostname) and not url.username and not url.password

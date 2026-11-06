@@ -1,11 +1,11 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status: candidate path correction after the operator-reported Coolify 4.6.0 source build succeeded but startup failed: generated per-service `env_file: .env` resolved under `deploy/arkx` instead of the checkout root. Stack readiness and live migration remain unproven. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
+Status: GitHub-built commit image candidate. The first server source build passed but startup failed on a generated environment-file path; root-path regression checks now pass. A coherent backup and isolated database restore passed. Schema upgrade is blocked until the image bundles its Prisma schema engine. Stack readiness and live migration remain unproven. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
 
 ## Files and choices
 
 - `compose.rehearsal.yaml`: seven infrastructure services, **no Postiz service**, no published ports, both networks internal. No application database changes or publishing workflows can run through this file.
-- `compose.production.yaml`: the same infrastructure plus the source-built application on internal port **5000**, behind the `production` profile. Only the application joins an outbound-capable network. Coolify must route its app domain to `postiz:5000`, never to infrastructure services.
+- `compose.production.yaml`: the same infrastructure plus the commit-tagged application image on internal port **5000**, behind the `production` profile. Only the application joins an outbound-capable network. Coolify must route its app domain to `postiz:5000`, never to infrastructure services.
 - `runtime-start.sh`: requires the exact runtime value `ARKX_RUNTIME=production` before executing the unchanged upstream command, `nginx && pnpm run pm2`. This custom wrapper variable is not a Postiz feature flag. It also blocks an accidental explicit `up postiz`, which would bypass profile selection.
 - `dynamicconfig/development-sql.yaml`: exact upstream configuration, mounted read-only.
 - `.env.example`: synthetic values for configuration rendering only. It intentionally sets `ARKX_RUNTIME=rehearsal`, so it cannot start Postiz through this wrapper. Never use it to launch infrastructure either; replace every synthetic value.
@@ -51,30 +51,36 @@ Future production activation is a separate explicit choice with real sends possi
 
 ```sh
 python3 deploy/arkx/preflight.py --mode production --check-new-volumes
-docker compose --project-directory . --env-file /dev/null -f deploy/arkx/compose.production.yaml --profile production up -d --build
+docker compose --project-directory . --env-file /dev/null -f deploy/arkx/compose.production.yaml --profile production up -d
 ```
 
 That command requires runtime `ARKX_RUNTIME=production`. In Coolify, the selected production runtime must explicitly apply **`--profile production`** to the Compose startup invocation, plus provide that runtime environment value. The candidate does not assume Coolify activates profiles automatically. Leave the GitHub-connected resource paused until the operator confirms its actual command/profile handling. Selecting the production file without the profile leaves the publisher stopped. Giving the wrong runtime value exits the application with code 64 before nginx or Postiz starts.
 
 ## Checks and remaining gaps
 
-The local check covers: exact service/image sets, zero published ports, application port, build arguments, named-volume separation, required secret interpolation, copied Temporal configuration, four denied startup selections, one allowed selection using stubs, Compose defaults/profiles, and rejection of missing required settings. In a temporary synthetic checkout, it also injects Coolify-style `env_file: .env` into every service in both files, proves normalized root build/bind/env-file paths and successful environment loading, and reproduces missing nested `.env` failures with the wrong project directory. No real checkout `.env` is created or read. Configuration rendering does not execute an image.
+The local check covers: exact service/image sets, zero published ports, application port, commit image, named-volume separation, required secret interpolation, copied Temporal configuration, four denied startup selections, one allowed selection using stubs, Compose defaults/profiles, and rejection of missing required settings. In a temporary synthetic checkout, it also injects Coolify-style `env_file: .env` into every service in both files, proves normalized root image/bind/env-file paths and successful environment loading, and reproduces missing nested `.env` failures with the wrong project directory. No real checkout `.env` is created or read. Configuration rendering does not execute an image.
 
 Open target-side checks: unused volume names; available memory/disk; exact Coolify YAML/profile/proxy/build-time environment behavior after this path correction; Temporal and application readiness; PostgreSQL 14.5 compatibility with the existing data and current schema; database restore and queue inspection; OAuth callback settings; first-account bootstrap and live application behavior. Temporal's dependency is service-started rather than API-ready, matching a candidate rather than proven healthy startup. No full-stack run or build-green claim is made for this patch. The operator owns root documentation, Git operations, and Coolify; the scoped workflow correction only adds explicit root flags.
 
 Lesson: a production profile alone does not block an explicitly targeted service. The runtime command guard closes that accidental path; rehearsal omits the application entirely.
 
-Coolify working-directory correction: all paths use the **repository root** as their coordinate base. The production application build context is `.`, and both Temporal binds are `./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro`. From the checkout root, the deployment uses these custom commands (Coolify supplies the selected compose file and generated environment):
+Coolify working-directory correction: all paths use the **repository root** as their coordinate base. The production application is pulled from GitHub Container Registry; both Temporal binds are `./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro`. From the checkout root, the deployment uses these custom commands (Coolify supplies the selected compose file and generated environment):
 
 ```sh
-docker compose --project-directory . --profile production build
+bash deploy/arkx/pull-image.sh
 docker compose --project-directory . up -d
 ```
 
-Do not use `--project-directory ./deploy/arkx`: Coolify's generated per-service `.env` then resolves to the missing `deploy/arkx/.env`, even when its CLI `--env-file` points at the root `.env`. The build profile selects the application for building only; the custom start command above does not itself activate that profile. The startup profile and exact `ARKX_RUNTIME=production` guard remain in place. The operator owns deliberate activation and target-side confirmation. Local commands must likewise pass `--project-directory .` from the checkout root, or an absolute checkout-root path from elsewhere. Keep generated runtime secrets out of the source build as required above.
+Do not use `--project-directory ./deploy/arkx`: Coolify's generated per-service `.env` then resolves to the missing `deploy/arkx/.env`, even when its CLI `--env-file` points at the root `.env`. The pull helper verifies the selected full commit and image source/revision labels. The custom start command above does not activate the production profile. The startup profile and exact `ARKX_RUNTIME=production` guard remain in place. The operator owns deliberate activation and target-side confirmation. Local commands must likewise pass `--project-directory .` from the checkout root, or an absolute checkout-root path from elsewhere. Keep generated runtime secrets out of the source build as required above.
 
 Review correction: Elasticsearch uses its standard `/usr/share/elasticsearch/data` persistence path in both candidates. The upstream sample's alternative mount path was not retained. Container-recreation persistence remains a runtime check.
 
 Migration compatibility: the existing signing secret is preserved exactly. The preflight requires a nonblank value rather than a new-secret length policy; changing a working legacy secret to satisfy a template would invalidate preserved authentication/encryption. Exact source-to-candidate equality is checked privately at configuration transfer and must be rechecked before activation.
 
-The path regression check covers both Compose files: repository-root configuration succeeds, while the nested-directory alternative fails before startup. It checks all generated service environment files, the source-build context and the read-only Temporal configuration bind. Effective Coolify startup remains a live acceptance check.
+The path regression check covers both Compose files: repository-root configuration succeeds, while the nested-directory alternative fails before startup. It checks all generated service environment files, the pinned application image and the read-only Temporal configuration bind. Effective Coolify startup remains a live acceptance check.
+
+## Commit-image delivery
+
+GitHub Actions builds `Dockerfile.dev` without production credentials and publishes only `ghcr.io/ark-x-ai-lab/postiz-app:sha-<full-commit>`. `SOURCE_COMMIT` must equal the deployment checkout. Coolify uses `bash deploy/arkx/pull-image.sh` as its custom build command; it never compiles the source. The helper pulls anonymously, checks revision/source labels, and fails on authentication or unrecognized errors. The package must permit anonymous pulls before the first deployment. Actual publication, registry visibility and Coolify pull behavior are acceptance checks, not yet proven.
+
+Prisma delivery patch: `prisma-generate` and startup `prisma-db-push` use the installed, pinned Prisma 6.5.0 dependency rather than downloading another CLI with `pnpm dlx`. The Docker build runs `prisma --version` with build-time networking. Before publication, CI executes the bundled schema engine and loads the client engine with no network, a read-only filesystem and an unprivileged user, requiring the lockfile engine commit. The old source-built image fails this gate as expected; a new image passing it remains required.

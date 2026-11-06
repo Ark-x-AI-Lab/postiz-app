@@ -6,6 +6,8 @@ runtime details stays in memory; errors deliberately omit subprocess output.
 """
 import argparse
 import hashlib
+import http.client
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -16,15 +18,22 @@ import signal
 import fcntl
 import socket
 import stat
+import ssl
 import subprocess
 import sys
 import time
-import urllib.request
 
 DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
 LABEL = "group.arkx.migration-rehearsal"
 SCHEMA = "/app/libraries/nestjs-libraries/src/database/prisma/schema.prisma"
 PRISMA = "/app/node_modules/prisma/build/index.js"
+# Image contract for the pinned Debian/OpenSSL 3 candidate, not a runtime download/cache.
+ENGINE_COMMIT = "173f8d54f8d52e692c7e27e72a88314ec7aeff60"
+ENGINE_ENV = {
+    "PRISMA_SCHEMA_ENGINE_BINARY": "/app/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x",
+    "PRISMA_QUERY_ENGINE_LIBRARY": "/app/node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node",
+    "PRISMA_CLI_QUERY_ENGINE_TYPE": "library",
+}
 EXPECTED = {"User": 1, "Organization": 1, "Integration": 2, "Media": 0, "Post": 0}
 ROLES = ("pg", "rollback", "tools", "egress", "dbprobe", "schema", "schema-repeat")
 SAFE_IMAGE_ENV = {"PATH", "NODE_VERSION", "YARN_VERSION", "PNPM_HOME", "NEXT_PUBLIC_VERSION",
@@ -125,6 +134,56 @@ def open_dump(args):
         raise
 
 
+def host_https_baseline(host):
+    """Choose one public IPv4 and prove that exact endpoint with verified TLS/SNI."""
+    try:
+        addresses = socket.getaddrinfo(host, 443, family=socket.AF_INET, type=socket.SOCK_STREAM)
+        ips = {ipaddress.IPv4Address(row[4][0]) for row in addresses}
+        need(ips and all(ip.is_global for ip in ips), "Probe DNS must resolve only public IPv4 addresses")
+        selected = str(min(ips, key=int))
+        context = ssl.create_default_context()
+        with socket.create_connection((selected, 443), timeout=10) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                tls.sendall(("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n").encode("ascii"))
+                response = http.client.HTTPResponse(tls, method="HEAD")
+                try:
+                    response.begin()
+                    need(200 <= response.status < 400, "Same-IP host HTTPS baseline not healthy")
+                finally:
+                    response.close()
+        return selected
+    except (OSError, ValueError, http.client.HTTPException):
+        raise Refusal("Same-IP host HTTPS baseline failed; no Docker operation attempted") from None
+
+
+def toolcheck_program():
+    """Read/execute only bundled engine version checks; no CLI or fetch-engine import."""
+    return """const fs = require('node:fs');
+const pkg = require('/app/node_modules/prisma/package.json');
+if (pkg.version !== '6.5.0') process.exit(41);
+for (const p of ['/app/.env', '/app/prisma/.env', '/app/libraries/nestjs-libraries/src/database/prisma/.env']) {
+  if (fs.existsSync(p)) process.exit(42);
+}
+if (!fs.existsSync('/app/node_modules/prisma/build/index.js')) process.exit(43);
+if (!fs.existsSync('""" + SCHEMA + """')) process.exit(44);
+const {spawnSync} = require('node:child_process');
+const engines = """ + json.dumps(ENGINE_ENV) + """;
+try {
+  for (const key of ['PRISMA_SCHEMA_ENGINE_BINARY','PRISMA_QUERY_ENGINE_LIBRARY']) {
+    const p = engines[key];
+    if (!fs.realpathSync(p).startsWith('/app/node_modules/') || !fs.statSync(p).isFile()) throw new Error();
+    fs.accessSync(p, fs.constants.R_OK | (key === 'PRISMA_SCHEMA_ENGINE_BINARY' ? fs.constants.X_OK : 0));
+  }
+  const version = spawnSync(engines.PRISMA_SCHEMA_ENGINE_BINARY, ['--version'], {timeout:10000, encoding:'utf8'});
+  if (version.status !== 0 || !version.stdout.split(/\\s+/).includes(""" + json.dumps(ENGINE_COMMIT) + """)) throw new Error();
+  if (require(engines.PRISMA_QUERY_ENGINE_LIBRARY).version().commit !== """ + json.dumps(ENGINE_COMMIT) + """) throw new Error();
+} catch (_) {
+  process.stdout.write('ENGINE_BUNDLE_INVALID');
+  process.exit(71); // Fail closed before CLI startup; never invoke Prisma's downloader.
+}
+process.stdout.write('TOOLS_OK');"""
+
+
 class Rehearsal:
     def __init__(self, args):
         self.args = args
@@ -134,6 +193,7 @@ class Rehearsal:
         self.password = secrets.token_urlsafe(36)
         self.labels = {LABEL: args.run_id, LABEL + ".prefix": args.prefix}
         self.created = {}
+        self.probe_ipv4 = None
 
     def label_args(self):
         result = []
@@ -170,6 +230,14 @@ class Rehearsal:
         endpoints = inspect("network", self.network, ".Containers") or {}
         need(set(x["Name"] for x in endpoints.values()) <= set(self.containers.values()), "Unexpected network attachment")
 
+    def extra_hosts(self, role):
+        if role != "egress":
+            return []
+        need(self.probe_ipv4 is not None, "Egress requires the verified same-IP host baseline")
+        ip = ipaddress.IPv4Address(self.probe_ipv4)
+        need(ip.is_global, "Egress mapping must be the selected public IPv4")
+        return [self.args.probe_host + ":" + str(ip)]
+
     def create(self, role, image, entrypoint, argv, env=None, volume=None):
         self.assert_network()
         name = self.containers[role]
@@ -177,6 +245,8 @@ class Rehearsal:
         options = ["container", "create", "--name", name, "--pull=never", *self.label_args(),
                    "--network", self.network, "--restart=no", "--no-healthcheck", "--log-driver=none", "--cap-drop=ALL",
                    "--security-opt", "no-new-privileges", "--entrypoint", entrypoint]
+        for mapping in self.extra_hosts(role):
+            options += ["--add-host", mapping]
         if volume:
             need(volume in self.volumes and role in ("pg", "rollback"), "Only fresh PostgreSQL volumes allowed")
             options += ["--user", "postgres", "--mount", "type=volume,src=" + volume + ",dst=/var/lib/postgresql/data"]
@@ -200,6 +270,8 @@ class Rehearsal:
         need(not inspect("container", target, ".HostConfig.PortBindings"), "Published ports refused")
         need(not inspect("container", target, ".HostConfig.Privileged"), "Privileged container refused")
         need(inspect("container", target, ".HostConfig.NetworkMode") == self.network, "Network mode mismatch")
+        need((inspect("container", target, ".HostConfig.ExtraHosts") or []) == self.extra_hosts(role),
+             "Container ExtraHosts must exactly match its role; only egress may pin the verified public IPv4")
         networks = inspect("container", target, ".NetworkSettings.Networks") or {}
         need(set(networks) == {self.network}, "Container must have only the rehearsal network")
         mounts = inspect("container", target, ".Mounts") or []
@@ -277,19 +349,11 @@ WHERE c.table_schema='public' AND t.table_type='BASE TABLE' GROUP BY c.table_nam
         emit("PASS: " + label + " preserves all " + str(len(expected)) + " original tables and every original column value")
 
     def run(self):
-        self.fresh()
         with open_dump(self.args) as source:
-            # Baseline is a separate host-side HTTPS request with proxies disabled.
-            addresses = socket.getaddrinfo(self.args.probe_host, 443, type=socket.SOCK_STREAM)
-            import ipaddress
-            need(addresses and all(ipaddress.ip_address(x[4][0]).is_global for x in addresses), "Probe DNS must resolve only public addresses")
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            try:
-                with opener.open("https://" + self.args.probe_host + "/", timeout=10) as response:
-                    need(200 <= response.status < 400, "Host HTTPS baseline not healthy")
-            except (OSError, ValueError):
-                raise Refusal("Host HTTPS baseline failed; outbound blocking cannot be inferred") from None
-            emit("PASS: separate host HTTPS baseline healthy (no proxy)")
+            # Before even Docker inspection: the container will use this exact endpoint.
+            self.probe_ipv4 = host_https_baseline(self.args.probe_host)
+            emit("PASS: same selected public IPv4 healthy over host HTTPS (verified TLS/SNI, no proxy)")
+            self.fresh()
             command(["network", "create", "--driver", "bridge", "--internal", *self.label_args(), self.network])
             self.assert_network()
             for volume in self.volumes:
@@ -300,16 +364,8 @@ WHERE c.table_schema='public' AND t.table_type='BASE TABLE' GROUP BY c.table_nam
             self.restore("pg", source)
             original_columns = self.columns("pg")
             before = self.snapshot("pg", original_columns)
-            toolcheck = """const fs = require('node:fs');
-const pkg = require('/app/node_modules/prisma/package.json');
-if (pkg.version !== '6.5.0') process.exit(41);
-for (const p of ['/app/.env', '/app/prisma/.env', '/app/libraries/nestjs-libraries/src/database/prisma/.env']) {
-  if (fs.existsSync(p)) process.exit(42);
-}
-if (!fs.existsSync('/app/node_modules/prisma/build/index.js')) process.exit(43);
-if (!fs.existsSync('""" + SCHEMA + """')) process.exit(44);
-process.stdout.write('TOOLS_OK');"""
-            need(self.node("tools", toolcheck) == b"TOOLS_OK", "Candidate toolchain/environment-file check failed")
+            need(self.node("tools", toolcheck_program()) == b"TOOLS_OK",
+                 "Candidate image needs matching bundled Prisma 6.5.0 schema/query engines; rebuild image, never download at runtime")
             # A response of ANY status means egress is possible. DNS/TLS errors do not prove isolation.
             probe = """(async () => {
 try {
@@ -325,7 +381,7 @@ try {
             emit("PASS: candidate Node HTTPS public-host probe blocked on internal-only network")
             env = {"DATABASE_URL": "postgresql://rehearsal:" + self.password + "@" + self.containers["pg"] + ":5432/postiz",
                    "CHECKPOINT_DISABLE": "1", "PRISMA_HIDE_UPDATE_MESSAGE": "1", "ARKX_RUNTIME": "rehearsal",
-                   "DISABLE_REGISTRATION": "true"}
+                   "DISABLE_REGISTRATION": "true", **ENGINE_ENV}
             dbprobe = """const {PrismaClient} = require('/app/node_modules/@prisma/client');
 (async () => { const p = new PrismaClient({log: []});
 try { await p.$connect(); process.stdout.write('DB_ALLOWED'); }

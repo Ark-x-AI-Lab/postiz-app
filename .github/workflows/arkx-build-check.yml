@@ -1,4 +1,4 @@
-name: Ark-x deployment build check
+name: Ark-x build and publish deployment image
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: arkx-build-${{ github.ref }}
@@ -16,6 +17,8 @@ jobs:
   source-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SOURCE_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Check deployment definitions
@@ -24,6 +27,7 @@ jobs:
           docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
           python3 deploy/arkx/preflight.py
           sh -n deploy/arkx/runtime-start.sh
+          bash -n deploy/arkx/pull-image.sh
       - name: Prove private files are excluded from the build context
         env:
           DOCKER_BUILDKIT: '1'
@@ -43,4 +47,35 @@ jobs:
           test -f "$RUNNER_TEMP/context-export/source/deploy/arkx/.env.example"
           rm .env.context-probe deploy/arkx/.env.context-probe deploy/arkx/context-probe.key
       - name: Build the source without production credentials
-        run: docker build --file Dockerfile.dev --build-arg NEXT_PUBLIC_VERSION=v2.25.3 --tag arkx-postiz-check:${{ github.sha }} .
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          docker build --platform linux/amd64 --file Dockerfile.dev \
+            --build-arg NEXT_PUBLIC_VERSION=v2.25.3 \
+            --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
+            --label org.opencontainers.image.source=https://github.com/Ark-x-AI-Lab/postiz-app \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --tag "$IMAGE" .
+      - name: Prove Prisma is usable offline in the runtime image
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          ENGINE_CHECK=$(python3 -c "import importlib.util; s=importlib.util.spec_from_file_location('rehearsal', 'deploy/arkx/rehearse-migration.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(m.toolcheck_program())")
+          ENGINE_RESULT=$(docker run --rm --network none --read-only --user 65534:65534 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint node "$IMAGE" -e "$ENGINE_CHECK")
+          test "$ENGINE_RESULT" = TOOLS_OK
+          docker run --rm --network none --read-only --user 65534:65534 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint node "$IMAGE" /app/node_modules/prisma/build/index.js --version
+      - name: Publish the commit image to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          export DOCKER_CONFIG="$RUNNER_TEMP/arkx-publish-docker"
+          mkdir -p "$DOCKER_CONFIG"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
+          docker push "$IMAGE"

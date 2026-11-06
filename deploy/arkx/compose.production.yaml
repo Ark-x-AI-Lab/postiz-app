@@ -5,13 +5,7 @@
       "profiles": [
         "production"
       ],
-      "build": {
-        "context": ".",
-        "dockerfile": "Dockerfile.dev",
-        "args": {
-          "NEXT_PUBLIC_VERSION": "v2.25.3"
-        }
-      },
+      "image": "ghcr.io/ark-x-ai-lab/postiz-app:sha-${SOURCE_COMMIT:?Set SOURCE_COMMIT to the full deployment commit SHA}",
       "command": [
         "sh",
         "/app/deploy/arkx/runtime-start.sh"

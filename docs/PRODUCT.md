@@ -39,3 +39,7 @@ No advertising, public posting, provider permission expansion or new paid infras
 See [architecture](architecture.md), [migration plan](../plans/coolify-migration.md) and [deployment decision](decisions/001-github-maintained-publisher.md).
 
 Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. Live migration has not occurred. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.
+
+## Deployment delivery
+
+The maintained fork builds its commit-tagged image in GitHub Actions and Coolify pulls that exact image. Production keys are runtime-only. The image must pass an offline, read-only Prisma tool check before publication. The existing publisher remains live while database upgrade, recovery and replacement readiness are tested.

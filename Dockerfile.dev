@@ -23,6 +23,8 @@ COPY . /app
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
 RUN pnpm install
+# Bundle the schema engine while build-time network access is available.
+RUN pnpm exec prisma --version
 RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
 
 CMD ["sh", "-c", "nginx && pnpm run pm2"]
