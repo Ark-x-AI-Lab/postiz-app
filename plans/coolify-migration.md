@@ -10,6 +10,6 @@ Approved direction: Mounssif, 6 November 2026. Work is in progress, not deployed
 6. Stop the old publisher, take the final recovery point, migrate and switch the existing domain. Read back the deployed commit and test login, API authorization, workspace/integration counts, media and registration denial.
 7. Retire only the old service resources identified at action time, after recovery checks. Preserve backups separately from volumes deleted with the old service. Do not delete the active migrated database or upload volume.
 
-Open prerequisites: current host capacity, backup/restore path, exact Temporal topology and GitHub App repository access. No local dependency installation or Docker image pull on the nearly full laptop.
+GitHub App repository access and paused resource creation are confirmed; source build and privacy checks pass. Open prerequisites: available resources at activation time, backup/restore path and runtime Temporal/application topology. No local dependency installation or Docker image pull on the nearly full laptop.
 
 Source preflight: the target recovery workflow only scans eligible already-overdue posts from the previous two days, and requires RUN_CRON. Do not rely on it to transfer future schedules. Inventory and reconcile every pending schedule; preserve old Redis recovery state. The fork retains the old User.marketplace field; normal schema guards remain enabled, with no accept-data-loss/reset flags.

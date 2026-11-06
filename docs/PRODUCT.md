@@ -25,8 +25,8 @@ Local branch → reviewed commit → GitHub deploy/arkx → Coolify GitHub App �
 ## Acceptance
 
 - [x] Fork exists in the correct organization and local clone has upstream remote.
-- [ ] Deployment definition and source build checked.
-- [ ] Coolify GitHub App connected to deploy/arkx.
+- [x] Deployment definitions, startup guards, schema validation and isolated GitHub source build pass.
+- [x] Coolify GitHub App connected to deploy/arkx; candidate stopped, no public domain, automatic deployment disabled until migration passes.
 - [ ] Isolated migration rehearsal succeeds with real sending disabled.
 - [ ] Backup restoration and old-version rollback are demonstrated.
 - [ ] Live cutover preserves authentication, workspace, integrations and files.
@@ -37,3 +37,5 @@ Local branch → reviewed commit → GitHub deploy/arkx → Coolify GitHub App �
 No advertising, public posting, provider permission expansion or new paid infrastructure is part of deployment validation. Diagnostic logs must exclude raw credentials, OAuth codes/state, request headers, profile data and raw provider response bodies. Public signup stays disabled; administrative helpers and databases stay private.
 
 See [architecture](architecture.md), [migration plan](../plans/coolify-migration.md) and [deployment decision](decisions/001-github-maintained-publisher.md).
+
+Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. Live migration has not occurred. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.

@@ -10,6 +10,6 @@ Secrets remain in Coolify runtime environment variables. Git holds source, build
 
 Database-schema upgrades occur during the upstream startup sequence. Reverting only the image is not a proven rollback: retain a coherent pre-upgrade database/media/configuration recovery point and stop the replacement before restoring the old stack.
 
-Current gap: exact production topology, current host capacity, backup restoration, deployment integration and cutover have not yet been proven.
+The stopped candidate is connected through the existing GitHub App and source-build checks pass. Current gaps: runtime topology/readiness, restored-data rehearsal, backup restoration, effective target deployment commands and cutover. A fresh scoped terminal probe observed about 2.5 GiB available memory and 22 GiB disk space; this is a snapshot, not a full-stack capacity guarantee.
 
 The fork retains the legacy `User.marketplace Boolean @default(true)` schema field from v2.10.1. Upstream v2.25.3 removed it; retaining it avoids intentionally dropping the column during guarded schema synchronization. This is a compatibility preservation change, not a new product option. The real database delta and restored-data startup still require rehearsal.

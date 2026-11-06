@@ -1,6 +1,6 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status: deployment candidate under review; no image build or stack startup has occurred. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
+Status: reviewed candidate; isolated GitHub source image build and context-privacy checks passed. No stack startup or live migration has occurred. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
 
 ## Files and choices
 
@@ -67,3 +67,5 @@ Lesson: a production profile alone does not block an explicitly targeted service
 Coolify working-directory note: the source build context and configuration bind mount are relative to this directory. The prepared Coolify custom build/start commands must set `--project-directory ./deploy/arkx` explicitly from the repository checkout root, rather than accepting Coolify's automatic project-directory override. Target-side resolution remains an acceptance check before any activation.
 
 Review correction: Elasticsearch uses its standard `/usr/share/elasticsearch/data` persistence path in both candidates. The upstream sample's alternative mount path was not retained. Container-recreation persistence remains a runtime check.
+
+Migration compatibility: the existing signing secret is preserved exactly. The preflight requires a nonblank value rather than a new-secret length policy; changing a working legacy secret to satisfy a template would invalidate preserved authentication/encryption. Exact source-to-candidate equality is checked privately at configuration transfer and must be rechecked before activation.

@@ -148,7 +148,7 @@ def environment_checks(mode, check_new):
         url = urlsplit(os.environ["ARKX_PUBLIC_URL"])
         need(url.scheme == "https" and bool(url.hostname) and not url.username and not url.password
              and not url.path and not url.query and not url.fragment, "ARKX_PUBLIC_URL must be an HTTPS origin with no trailing slash")
-        need(len(os.environ["JWT_SECRET"]) >= 48, "JWT_SECRET must have at least 48 random characters")
+        need(bool(os.environ["JWT_SECRET"].strip()), "Preserve the existing nonblank JWT_SECRET; do not rotate it for migration")
     # Dockerfile.dev copies the source tree. Never let a generated runtime env file enter its context.
     unsafe = []
     for base, dirs, files in os.walk(ROOT):
