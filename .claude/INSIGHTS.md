@@ -15,3 +15,5 @@
 - Offline TypeScript transpilation on the laptop is not the pinned-runtime build. Run diagnostic safety tests inside the actual Node22/TypeScript5.5 image with source overlays or the built commit image, network disabled and a read-only filesystem.
 
 - Post analytics receive no inherent media-format proof from a native post ID. Carry optional saved dispatch context from the org-scoped Post lookup through the provider interface and standalone delegation; unknown media/settings remain unproven. Validate explicit counter presence before attaching provenance; a missing LinkedIn total is not zero.
+
+- Facebook Page feed insights do not supply every interaction counter. Count-only LIKE-filtered reactions and stream-comment summaries returned explicit0 under the existing Page credential; shares was omitted and must remain unavailable. Keep vendor-filter definitions explicit, validate exact node identity/empty actor arrays, and isolate summary failures from insights. A zero-only transport probe is not certification of CARE/reply inclusion or ordinary editorial Results ingestion.

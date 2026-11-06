@@ -1,6 +1,6 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status — 6 November 2026: source efa822c4c81b7871ea8f50bd02868f8a713dccbf is live at postiz.arkx.group. Three neutral test accounts published the approved scheduled post. The old service was retired with original volumes and recovery backup preserved. Automatic deploy remains disabled. The detailed candidate/rehearsal notes below are historical preparation evidence, not the current cutover status. New checked-analytics source is local and awaits reviewed image build/deployment.
+Status — 6 November 2026: source d7a1911508da31fc20ea42a51c1bb2f4f38a7f31 is live at postiz.arkx.group. Three neutral test accounts published the approved scheduled post. The old service was retired with original volumes and recovery backup preserved. Automatic deploy remains disabled. The detailed candidate/rehearsal notes below are historical preparation evidence, not the current cutover status. Checked lifetime analytics passed pinned image and live read checks. A follow-up Facebook aggregate-summary patch is being prepared; it is not deployed.
 
 ## Files and choices
 

@@ -8,7 +8,7 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
-import { metaPostAnalytics } from '../post-analytics';
+import { facebookCountAnalytics, facebookCountContext, metaPostAnalytics } from '../post-analytics';
 import dayjs from 'dayjs';
 import {
   BadBody,
@@ -1093,6 +1093,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     context?: PostAnalyticsContext
   ): Promise<AnalyticsData[]> {
     const today = dayjs().format('YYYY-MM-DD');
+    if (facebookCountContext(postId, context)) return facebookCountAnalytics(accessToken, postId, today, context);
     // Bare video/story identifiers retain their legacy, unproven analytics path.
     if (!postId.includes('_')) return this.videoPostAnalytics(accessToken, postId, today);
     try {

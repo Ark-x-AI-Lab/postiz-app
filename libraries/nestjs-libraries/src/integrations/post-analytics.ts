@@ -94,6 +94,82 @@ export function metaPostAnalytics(body: unknown, provider: 'facebook' | 'instagr
   return result.rows();
 }
 
+const facebookSummaries = [
+  { key: 'likes', edge: 'reactions', label: 'Like reactions (Facebook LIKE filter)', fields: 'id,reactions.type(LIKE).limit(0).summary(total_count)' },
+  { key: 'comments', edge: 'comments', label: 'Comments (Facebook stream filter)', fields: 'id,comments.filter(stream).limit(0).summary(total_count)' },
+  { key: 'shares', edge: 'shares', label: 'Shares', fields: 'id,shares' },
+] as const;
+export function facebookCountContext(postId: string, context?: PostAnalyticsContext): boolean {
+  return context?.provider === 'facebook' && context.mediaKind === 'single-image'
+    && /^[1-9]\d{0,39}_[1-9]\d{0,39}$/.test(postId);
+}
+const closed = (value: unknown, keys: readonly string[]): value is Record<string, unknown> =>
+  analyticsBody(value) && Object.keys(value).every(key => keys.includes(key));
+
+/** Only the explicitly requested vendor-filtered summaries, never actor rows or inferred zeros. */
+export function facebookSummaryAnalytics(postId: string, bodies: readonly unknown[], today: string, context?: PostAnalyticsContext): AnalyticsData[] {
+  if (!facebookCountContext(postId, context) || bodies.length !== 3) return [];
+  const result = collector(today, true);
+  facebookSummaries.forEach((spec, index) => {
+    const body = bodies[index];
+    if (!closed(body, ['id', spec.edge]) || !own(body, 'id') || body.id !== postId || !own(body, spec.edge)) return;
+    const edge = body[spec.edge];
+    if (spec.edge === 'shares') {
+      if (closed(edge, ['count']) && own(edge, 'count')) result.add(spec.key, spec.label, explicitCount(edge.count));
+      return;
+    }
+    if (!closed(edge, ['data', 'summary']) || !own(edge, 'data') || !Array.isArray(edge.data) || edge.data.length !== 0
+      || !own(edge, 'summary') || !closed(edge.summary, ['total_count']) || !own(edge.summary, 'total_count')) return;
+    result.add(spec.key, spec.label, explicitCount(edge.summary.total_count));
+  });
+  return result.rows();
+}
+
+/** Four independent GETs share one 15s deadline; every decoded body is capped at 16KiB. */
+export async function facebookCountAnalytics(accessToken: string, postId: string, today: string, context?: PostAnalyticsContext): Promise<AnalyticsData[]> {
+  if (!facebookCountContext(postId, context)) return [];
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  const expired = new Promise<undefined>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(undefined); }, 15_000); });
+  const base = `https://graph.facebook.com/v25.0/${postId}`;
+  async function get(url: string): Promise<unknown> {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const response = await Promise.race([fetch(url, { method: 'GET', redirect: 'error', cache: 'no-store',
+        signal: controller.signal, headers: { Authorization: `Bearer ${accessToken}` } }), expired]);
+      if (!response) return undefined;
+      const declared = response.headers.get('content-length');
+      if (!response.ok || response.redirected || (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > 16_384))) {
+        void response.body?.cancel().catch(() => undefined); return undefined;
+      }
+      reader = response.body?.getReader();
+      if (!reader) return undefined;
+      const chunks: Uint8Array[] = []; let size = 0;
+      for (;;) {
+        const part = await Promise.race([reader.read(), expired]);
+        if (!part) return undefined;
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > 16_384) return undefined;
+        chunks.push(part.value);
+      }
+      const bytes = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch { return undefined; }
+    finally {
+      if (reader) { void reader.cancel().catch(() => undefined); reader.releaseLock(); }
+    }
+  }
+  try {
+    const bodies = await Promise.all([
+      `${base}/insights?metric=post_total_media_view_unique,post_reactions_by_type_total,post_clicks,post_clicks_by_type`,
+      ...facebookSummaries.map(spec => `${base}?fields=${encodeURIComponent(spec.fields)}`),
+    ].map(get));
+    return [...metaPostAnalytics(bodies[0], 'facebook', today, context), ...facebookSummaryAnalytics(postId, bodies.slice(1), today, context)];
+  } finally { clearTimeout(timer!); }
+}
+
 const linkedinMetrics: Record<string, { key: MetricKey; label: string }> = {
   impressionCount: { key: 'impressions', label: 'Impressions' }, uniqueImpressionsCount: { key: 'uniqueImpressions', label: 'Unique Impressions' },
   clickCount: { key: 'clicks', label: 'Clicks' }, likeCount: { key: 'likes', label: 'Likes' },

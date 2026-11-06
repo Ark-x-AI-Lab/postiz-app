@@ -1,6 +1,6 @@
 # Postiz for Social Studio
 
-Status — 6 November 2026: the GitHub-built v2.25.3 replacement is live at postiz.arkx.group. The old service is retired with its original volumes and recovery backup retained. Checked post-analytics changes below are local and not deployed.
+Status — 6 November 2026: the GitHub-built v2.25.3 replacement is live at postiz.arkx.group. The old service is retired with its original volumes and recovery backup retained. Checked lifetime post analytics are deployed on source d7a1911508da31fc20ea42a51c1bb2f4f38a7f31. The next Facebook summary-counter patch is in preparation.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Social Studio is where the team creates and approves content. Postiz is the publ
 
 - Upstream: gitroomhq/postiz-app; deployment baseline v2.25.3.
 - Our repository: Ark-x-AI-Lab/postiz-app; deployment branch deploy/arkx.
-- Live source: efa822c4c81b7871ea8f50bd02868f8a713dccbf, v2.25.3; immutable commit image.
+- Live source: d7a1911508da31fc20ea42a51c1bb2f4f38a7f31, v2.25.3; immutable commit image.
 - Facebook, Instagram and LinkedIn test accounts are connected. One approved neutral scheduled post was published to all three; independent native reads matched caption, author and image.
 - LinkedIn token exchange was repaired by correcting the existing app secret in persistent runtime configuration. No new app or expanded permission was needed for that repair.
 
@@ -38,7 +38,7 @@ No advertising, public posting, provider permission expansion or new paid infras
 
 See [architecture](architecture.md), [migration plan](../plans/coolify-migration.md) and [deployment decision](decisions/001-github-maintained-publisher.md).
 
-Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. That build was pre-cutover evidence; the later Efa source is live. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.
+Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. That build was pre-cutover evidence; the later D7 checked-analytics source is live. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.
 
 ## Deployment delivery
 
@@ -62,6 +62,12 @@ The maintained connector includes temporary, opt-in stage diagnostics for connec
 
 Recovery evidence: the old publisher image also booted against the independent restored old-schema database and a fresh Redis instance loaded from the verified RDB; its5 API checks pass. Configuration and uploads restored to fresh test volumes match every saved file name/content hash (0 config files,3 upload files; archive directories counted separately). A synthetic value encrypted by the actual old helper decrypts with the actual new helper under the preserved secret. No real integration token was read for that check. This is still not an independently verified full UI rollback or live cutover.
 
-## Checked per-post audience measurements — local change
+## Checked per-post audience measurements — deployed D7
 
-The analytics response keeps its bare array shape and adds optional metric identity, lifetime basis and explicit-count provenance for reviewed saved single-image dispatch paths. Missing or invalid counts are omitted rather than replaced with zeros. Facebook reach, reactions and clicks remain distinct; LinkedIn error-shaped or missing counters cannot become zero. Unknown/video/story/personal-profile formats do not gain provenance. Studio requires these fields before ingesting measurements. Focused source fixtures passed; pinned image build, deployment and live acceptance remain open.
+The analytics response keeps its bare array shape and adds optional metric identity, lifetime basis and explicit-count provenance for reviewed saved single-image dispatch paths. Missing or invalid counts are omitted rather than replaced with zeros. Facebook reach, reactions and clicks remain distinct; LinkedIn error-shaped or missing counters cannot become zero. Unknown/video/story/personal-profile formats do not gain provenance. Studio requires these fields before ingesting measurements. The pinned source/image workflow and exact live image receipt passed. Real reads on the three approved neutral test posts passed Studio’s strict parser: Facebook supplied clicks only; Instagram and LinkedIn supplied explicit aggregate counts. Ordinary live editorial-post ingestion remains open; connection tests are not mirrored or resent.
+
+## Facebook summary counters — next patch, not deployed
+
+The current provider requests insights only, leaving supported node/edge counts unread. Three count-only probes on the exact existing neutral Page post returned explicit0 for LIKE-filtered reactions and stream comments; shares was omitted and remains unavailable. No actor rows, post writes, permission change or credential refresh occurred. The local implementation reads these aggregate summaries independently of insights, only for proven saved single-image Page posts. Four GETs maximum, fixed Meta origin/version, bearer headers, no redirects/retries/pagination, bounded time/body size. Invalid, mismatched or error-shaped summaries cannot become counts; explicit0 remains distinct from missing. Unknown/video/story paths retain their prior behavior.
+
+Definitions follow the exact vendor filters: likes means the returned LIKE-filtered reaction total; comments means the returned stream-comment summary. This does not certify whether Meta groups CARE reactions or which replies its summary includes. Do not relabel all reactions as likes or compare different networks as if their definitions were identical. Source: [Meta SDK25 Post](https://github.com/facebook/facebook-python-business-sdk/blob/25.0.0/facebook_business/adobjects/post.py), [Profile types](https://github.com/facebook/facebook-python-business-sdk/blob/25.0.0/facebook_business/adobjects/profile.py) and [Comment filters](https://github.com/facebook/facebook-python-business-sdk/blob/25.0.0/facebook_business/adobjects/comment.py). Twenty-four focused tests and a bounded review pass. The exact candidate helper, transpiled in memory inside the existing Node22 publisher image, returned clicks0/likes0/comments0 accepted by Studio’s actual parser; shares/reach stayed missing. This read-only candidate check did not replace the running publisher or write saved Results. Full provider compilation, pinned image checks and exact deployed readback remain required.

@@ -20,7 +20,7 @@ const files = {
 
 // Same source-transpile/substitute pattern as linkedin.oauth.diagnostics.test.cjs.
 // No real provider, database, Redis, OAuth client, application bootstrap or environment is loaded.
-function fixture() {
+function fixture(runtime = {}) {
   const cache = {}, calls = [], logs = [], redis = [];
   let respond = async () => { throw new Error('Unexpected synthetic fetch'); };
   const decorator = () => () => undefined;
@@ -42,9 +42,10 @@ function fixture() {
     const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, reportDiagnostics: true,
       compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true, esModuleInterop: true } });
     assert.deepEqual(compiled.diagnostics.filter(item => item.category === ts.DiagnosticCategory.Error), []);
-    new Function('require', 'module', 'exports', 'fetch', 'console', compiled.outputText)(dependency, module, module.exports,
+    new Function('require', 'module', 'exports', 'fetch', 'console', 'setTimeout', 'clearTimeout', compiled.outputText)(dependency, module, module.exports,
       async (url, init) => { assert.equal(init?.method || 'GET', 'GET'); calls.push({ url, init }); return respond(url, init); },
-      { warn: (...args) => logs.push(args), error: (...args) => logs.push(args), log: (...args) => logs.push(args) });
+      { warn: (...args) => logs.push(args), error: (...args) => logs.push(args), log: (...args) => logs.push(args) },
+      runtime.setTimeout || setTimeout, runtime.clearTimeout || clearTimeout);
     cache[key] = module.exports;
     return module.exports;
   }
@@ -232,4 +233,140 @@ test('actual service derives optional context only from its org-scoped saved pos
     assert.deepEqual(args, [['native-page', sentinel, 'resolved-release', 30, eligible ? context(provider) : undefined]]);
     assert.equal(f.redis.length, 1); assert.equal(f.calls.length, 0);
   }
+});
+
+
+const facebookPostId = '123_456';
+const summaryBodies = () => [
+  { id: facebookPostId, reactions: { data: [], summary: { total_count: 0 } } },
+  { id: facebookPostId, comments: { data: [], summary: { total_count: 2 } } },
+  { id: facebookPostId, shares: { count: 3 } },
+];
+const jsonResponse = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+const batchIndex = url => {
+  const parsed = new URL(url), fields = parsed.searchParams.get('fields');
+  return parsed.pathname.endsWith('/insights') ? -1 : fields.includes('reactions') ? 0 : fields.includes('comments') ? 1 : 2;
+};
+const insightBody = () => ({ data: [metric('post_total_media_view_unique', 0), metric('post_reactions_by_type_total', { love: 4 })] });
+function batchFixture(runtime = {}) {
+  const f = fixture(runtime);
+  f.respond = async url => jsonResponse(batchIndex(url) < 0 ? insightBody() : summaryBodies()[batchIndex(url)]);
+  return f;
+}
+
+test('Facebook count summaries retain explicit zero/positive counts with exact vendor-filter labels', () => {
+  const rows = helper.facebookSummaryAnalytics(facebookPostId, summaryBodies(), today, context('facebook'));
+  proven(rows); assert.deepEqual(byKey(rows), { likes: '0', comments: '2', shares: '3' });
+  assert.deepEqual(rows.map(row => row.label), ['Like reactions (Facebook LIKE filter)', 'Comments (Facebook stream filter)', 'Shares']);
+  const bodies = summaryBodies(); bodies[2] = { id: facebookPostId };
+  assert.deepEqual(byKey(helper.facebookSummaryAnalytics(facebookPostId, bodies, today, context('facebook'))), { likes: '0', comments: '2' });
+  bodies[0].reactions.summary.total_count = '7'; bodies[1].comments.summary.total_count = 0;
+  assert.deepEqual(byKey(helper.facebookSummaryAnalytics(facebookPostId, bodies, today, context('facebook'))), { likes: '7', comments: '0' });
+});
+test('Facebook summary identity, projection, nested errors and actor-bearing fields fail independently closed', () => {
+  for (const index of [0, 1, 2]) {
+    const edge = ['reactions', 'comments', 'shares'][index];
+    for (const mutate of [
+      body => { body.id = '123_999'; }, body => { delete body.id; },
+      body => { body.actor = { name: sentinel }; }, body => { body[edge].actor = sentinel; },
+      ...[{ error: sentinel }, { errors: [] }, { serviceErrorCode: 0 }, { status: 403 }].flatMap(marker => [
+        body => Object.assign(body, marker), body => Object.assign(body[edge], marker),
+        body => Object.assign(index === 2 ? body[edge] : body[edge].summary, marker),
+      ]),
+    ]) {
+      const bodies = summaryBodies(); mutate(bodies[index]);
+      const rows = helper.facebookSummaryAnalytics(facebookPostId, bodies, today, context('facebook'));
+      assert.equal(rows.some(row => row.metricKey === ['likes', 'comments', 'shares'][index]), false);
+      assert.equal(rows.length, 2); assert.equal(JSON.stringify(rows).includes(sentinel), false);
+    }
+  }
+  for (const edge of ['reactions', 'comments']) for (const bad of [undefined, null, {}, [{ get name() { assert.fail('Never inspect actor content'); } }]]) {
+    const bodies = summaryBodies(), index = edge === 'reactions' ? 0 : 1; bodies[index][edge].data = bad;
+    assert.equal(helper.facebookSummaryAnalytics(facebookPostId, bodies, today, context('facebook')).length, 2);
+  }
+});
+test('Facebook summary counts require their own explicit safe value and never infer missing/unsafe values', () => {
+  for (const index of [0, 1, 2]) for (const value of [undefined, null, false, '', -1, 0.5, NaN, Infinity, 9007199254740992, '01', '1e3']) {
+    const bodies = summaryBodies();
+    if (index === 2) bodies[index].shares.count = value;
+    else bodies[index][index === 0 ? 'reactions' : 'comments'].summary.total_count = value;
+    assert.equal(helper.facebookSummaryAnalytics(facebookPostId, bodies, today, context('facebook')).length, 2);
+  }
+});
+test('actual Facebook provider dispatches exactly four parallel fixed-origin GETs with header-only credentials', async () => {
+  const timers = [], cleared = [], f = batchFixture({ setTimeout: (fn, ms) => { timers.push({ fn, ms }); return 1; }, clearTimeout: id => cleared.push(id) });
+  const rows = await new (f.load('facebook').FacebookProvider)().postAnalytics('123', sentinel, facebookPostId, 30, context('facebook'));
+  proven(rows); assert.deepEqual(byKey(rows), { reach: '0', reactions: '4', likes: '0', comments: '2', shares: '3' });
+  assert.equal(f.calls.length, 4); assert.deepEqual(timers.map(t => t.ms), [15000]); assert.deepEqual(cleared, [1]);
+  const expectedFields = ['id,reactions.type(LIKE).limit(0).summary(total_count)', 'id,comments.filter(stream).limit(0).summary(total_count)', 'id,shares'];
+  f.calls.forEach(({ url, init }, index) => {
+    const parsed = new URL(url); assert.equal(parsed.origin, 'https://graph.facebook.com');
+    assert.equal(parsed.pathname, '/v25.0/' + facebookPostId + (index === 0 ? '/insights' : ''));
+    assert.deepEqual([...parsed.searchParams.keys()], [index === 0 ? 'metric' : 'fields']);
+    if (index) assert.equal(parsed.searchParams.get('fields'), expectedFields[index - 1]);
+    assert.equal(init.method, 'GET'); assert.equal(init.body, undefined); assert.equal(init.redirect, 'error');
+    assert.deepEqual(init.headers, { Authorization: 'Bearer ' + sentinel }); assert.equal(init.signal, f.calls[0].init.signal);
+    assert.equal(url.includes(sentinel), false); assert.equal(url.includes('access_token'), false);
+  });
+  assert.deepEqual(f.logs, []);
+});
+test('unknown/wrong formats and nonnumeric Page-post IDs issue no additional summary calls', async () => {
+  for (const postId of ['', '123', '0_456', '123_0', '123_456/actors', '123_456?fields=name', 'a_b', '1'.repeat(41) + '_2']) {
+    const f = batchFixture(); assert.equal(f.load('helper').facebookCountContext(postId, context('facebook')), false);
+    assert.deepEqual(await f.load('helper').facebookCountAnalytics(sentinel, postId, today, context('facebook')), []); assert.equal(f.calls.length, 0);
+  }
+  for (const ctx of [undefined, { provider: 'facebook', mediaKind: 'video' }, context('instagram')]) {
+    const f = batchFixture();
+    const rows = await new (f.load('facebook').FacebookProvider)().postAnalytics('123', sentinel, facebookPostId, 30, ctx);
+    assert.equal(f.calls.length, 1); assert.ok(f.calls[0].url.includes('/insights?metric='));
+    assert.ok(rows.every(row => row.provenance === undefined));
+  }
+});
+test('failed insights retain healthy summaries and failed summaries retain healthy insights without retries', async () => {
+  for (const failed of [-1, 0, 1, 2]) {
+    const f = batchFixture();
+    f.respond = async url => { if (batchIndex(url) === failed) throw new Error(sentinel); return jsonResponse(batchIndex(url) < 0 ? insightBody() : summaryBodies()[batchIndex(url)]); };
+    const rows = await f.load('helper').facebookCountAnalytics(sentinel, facebookPostId, today, context('facebook'));
+    const keys = Object.keys(byKey(rows)); assert.equal(keys.includes(failed < 0 ? 'reach' : ['likes', 'comments', 'shares'][failed]), false);
+    assert.ok(keys.includes(failed < 0 ? 'likes' : 'reach')); assert.equal(f.calls.length, 4); assert.deepEqual(f.logs, []);
+  }
+});
+test('Facebook summary transport rejects HTTP/redirect/length/JSON/UTF8 errors without inspecting actor/error bodies', async () => {
+  for (const failure of ['http', 'redirect', 'declared', 'json', 'utf8']) {
+    let cancelled = 0; const f = batchFixture();
+    f.respond = async url => {
+      if (batchIndex(url) !== 0) return jsonResponse(batchIndex(url) < 0 ? insightBody() : summaryBodies()[batchIndex(url)]);
+      if (failure === 'json') return new Response('{invalid');
+      if (failure === 'utf8') return new Response(new Uint8Array([255]));
+      return { ok: failure !== 'http', redirected: failure === 'redirect', headers: new Headers(failure === 'declared' ? { 'content-length': '16385' } : {}),
+        body: { cancel: async () => { cancelled++; }, getReader: () => assert.fail('Refused response must not read content') } };
+    };
+    const rows = await f.load('helper').facebookCountAnalytics(sentinel, facebookPostId, today, context('facebook'));
+    assert.equal(byKey(rows).likes, undefined); assert.equal(byKey(rows).comments, '2'); assert.equal(f.calls.length, 4);
+    if (!['json', 'utf8'].includes(failure)) assert.equal(cancelled, 1); assert.deepEqual(f.logs, []);
+  }
+});
+test('decoded byte cap accepts exact16KiB and cancels an oversized stream before its next chunk', async () => {
+  for (const oversized of [false, true]) {
+    let reads = 0, cancelled = 0; const f = batchFixture();
+    f.respond = async url => {
+      if (batchIndex(url) !== 0) return jsonResponse(batchIndex(url) < 0 ? insightBody() : summaryBodies()[batchIndex(url)]);
+      if (!oversized) return new Response(JSON.stringify(summaryBodies()[0]).padEnd(16384, ' '));
+      return { ok: true, redirected: false, headers: new Headers(), body: { getReader: () => ({
+        read: async () => { reads++; return { done: false, value: new Uint8Array(16385) }; },
+        cancel: async () => { cancelled++; }, releaseLock() {},
+      }) } };
+    };
+    const rows = await f.load('helper').facebookCountAnalytics(sentinel, facebookPostId, today, context('facebook'));
+    assert.equal(byKey(rows).likes, oversized ? undefined : '0');
+    if (oversized) { assert.equal(reads, 1); assert.equal(cancelled, 1); }
+  }
+});
+test('one15s batch deadline returns healthy independent summaries even when an insights fetch never settles', async () => {
+  const timers = [], f = batchFixture({ setTimeout: (fn, ms) => { timers.push({ fn, ms }); return 1; }, clearTimeout() {} });
+  f.respond = async url => batchIndex(url) < 0 ? new Promise(() => {}) : jsonResponse(summaryBodies()[batchIndex(url)]);
+  const pending = f.load('helper').facebookCountAnalytics(sentinel, facebookPostId, today, context('facebook'));
+  assert.equal(f.calls.length, 4); await new Promise(setImmediate); timers[0].fn();
+  const rows = await pending; assert.deepEqual(byKey(rows), { likes: '0', comments: '2', shares: '3' });
+  assert.ok(f.calls.every(call => call.init.signal.aborted)); assert.equal(f.calls.length, 4); assert.deepEqual(f.logs, []);
 });
