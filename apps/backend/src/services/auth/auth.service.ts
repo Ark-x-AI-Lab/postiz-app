@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Provider, User } from '@prisma/client';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { LoginUserDto } from '@gitroom/nestjs-libraries/dtos/auth/login.user.dto';
@@ -19,15 +19,8 @@ export class AuthService {
     private _emailService: EmailService,
     private _providerManager: AuthProviderManager
   ) {}
-  async canRegister(provider: string) {
-    if (
-      process.env.DISABLE_REGISTRATION !== 'true' ||
-      provider === Provider.GENERIC
-    ) {
-      return true;
-    }
-
-    return (await this._organizationService.getCount()) === 0;
+  async canRegister(_provider: string) {
+    return process.env.DISABLE_REGISTRATION !== 'true';
   }
 
   async routeAuth(
@@ -324,6 +317,13 @@ export class AuthService {
     );
     if (checkExists) {
       return { jwt: await this.jwt(checkExists) };
+    }
+
+    if (!(await this.canRegister(provider))) {
+      throw new ForbiddenException({
+        code: 'registration_disabled',
+        message: 'This publisher is private. Contact your administrator.',
+      });
     }
 
     return { token };

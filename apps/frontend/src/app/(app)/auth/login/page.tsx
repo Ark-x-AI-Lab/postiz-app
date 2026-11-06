@@ -7,5 +7,7 @@ export const metadata: Metadata = {
   description: '',
 };
 export default async function Auth() {
-  return <Login />;
+  return (
+    <Login registrationEnabled={process.env.DISABLE_REGISTRATION !== 'true'} />
+  );
 }

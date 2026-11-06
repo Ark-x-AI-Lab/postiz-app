@@ -195,6 +195,16 @@ jobs:
             --entrypoint node "$IMAGE" --test \
             /app/libraries/nestjs-libraries/src/integrations/linkedin.oauth.diagnostics.test.cjs \
             /app/libraries/nestjs-libraries/src/integrations/post-analytics.test.cjs
+      - name: Check private registration with pinned runtime dependencies
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          docker run --rm --network none --read-only --user 65534:65534 \
+            --cap-drop=ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint node "$IMAGE" --test \
+            /app/deploy/arkx/private-registration.test.cjs \
+            /app/deploy/arkx/private-registration-ui.test.cjs
       - name: Check runtime tools and final image payload
         env:
           IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}

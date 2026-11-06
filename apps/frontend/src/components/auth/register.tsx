@@ -5,7 +5,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import Link from 'next/link';
 import { Button } from '@gitroom/react/form/button';
 import { Input } from '@gitroom/react/form/input';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { classValidatorResolver } from '@hookform/resolvers/class-validator';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { GithubProvider } from '@gitroom/frontend/components/auth/providers/github.provider';
@@ -41,38 +41,100 @@ type Inputs = {
 export function Register() {
   const getQuery = useSearchParams();
   const fetch = useFetch();
-  const [provider] = useState(getQuery?.get('provider')?.toUpperCase());
-  const [code, setCode] = useState(getQuery?.get('code') || '');
-  const [state] = useState(getQuery?.get('state') || '');
-  const [show, setShow] = useState(false);
+  const provider = getQuery?.get('provider')?.toUpperCase() || '';
+  const code = getQuery?.get('code') || '';
+  const state = getQuery?.get('state') || '';
+  const isCallback = ['provider', 'code', 'state', 'error'].some((key) =>
+    getQuery?.has(key)
+  );
+  const validCallback =
+    !!code &&
+    !getQuery?.has('error') &&
+    ['GOOGLE', 'GITHUB', 'APPLE', 'GENERIC', 'FARCASTER', 'WALLET'].includes(
+      provider
+    );
+  const key = JSON.stringify([provider, code, state, validCallback]);
+  type CallbackResult = {
+    key: string;
+    status: 'register' | 'private' | 'error' | 'login';
+    token?: string;
+  };
+  const [result, setResult] = useState<CallbackResult>();
+  // Reuse the exchange during effect replay: authorization codes are single-use.
+  const attempt = useRef<
+    { key: string; promise: Promise<CallbackResult> } | undefined
+  >(undefined);
   useEffect(() => {
-    if (provider && code) {
-      load();
+    if (!isCallback || !validCallback) {
+      return;
     }
-  }, []);
-  const load = useCallback(async () => {
-    const { token } = await (
-      await fetch(`/auth/oauth/${provider?.toUpperCase() || 'LOCAL'}/exists`, {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          state,
-        }),
-      })
-    ).json();
-    if (token) {
-      setCode(token);
-      setShow(true);
+    let active = true;
+    if (attempt.current?.key !== key) {
+      attempt.current = {
+        key,
+        promise: (async (): Promise<CallbackResult> => {
+          try {
+            const response = await fetch(`/auth/oauth/${provider}/exists`, {
+              method: 'POST',
+              body: JSON.stringify({ code, state }),
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              return {
+                key,
+                status:
+                  response.status === 403 &&
+                  body?.code === 'registration_disabled'
+                    ? 'private'
+                    : 'error',
+              };
+            }
+            // The shared fetch wrapper already handles cookies and reload headers.
+            if (body?.login === true) {
+              return { key, status: 'login' };
+            }
+            if (typeof body?.token === 'string' && body.token.trim()) {
+              return { key, status: 'register', token: body.token };
+            }
+          } catch {
+            // Never render provider responses, authorization codes or exception text.
+          }
+          return { key, status: 'error' };
+        })(),
+      };
     }
-  }, [provider, code]);
-  if (!code && !provider) {
+    void attempt.current.promise.then((next) => {
+      if (active) {
+        setResult(next);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [fetch, key, provider, code, state, isCallback, validCallback]);
+  if (!isCallback) {
     return <RegisterAfter token="" provider="LOCAL" />;
   }
-  if (!show) {
+  const current = result?.key === key ? result : undefined;
+  if (validCallback && !current) {
     return <LoadingComponent />;
   }
+  if (current?.status === 'register') {
+    return <RegisterAfter token={current.token!} provider={provider} />;
+  }
   return (
-    <RegisterAfter token={code} provider={provider?.toUpperCase() || 'LOCAL'} />
+    <div className="flex flex-col gap-4 text-sm">
+      <p role="status">
+        {current?.status === 'private'
+          ? 'This publisher is private. Contact your administrator.'
+          : current?.status === 'login'
+          ? 'Signing you in. If you are not redirected, return to sign in.'
+          : 'Unable to sign in. Please return to sign in and try again.'}
+      </p>
+      <Link href="/auth/login" className="underline cursor-pointer">
+        Return to sign in
+      </Link>
+    </div>
   );
 }
 function getHelpfulReasonForRegistrationFailure(httpCode: number) {

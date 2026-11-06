@@ -1,21 +1,31 @@
 # Publisher architecture
 
-Studio and Postiz are separate applications and repositories. Studio calls Postiz's server-side public API. Postiz holds workspace/channel state and performs scheduled delivery.
+Social Studio and Postiz are separate applications and repositories. Studio creates and approves content and calls Postiz's server-side public API. Postiz holds workspace/channel state and performs scheduled delivery.
 
-Current live deployment: upstream Postiz v2.10.1, PostgreSQL 14.5 and Redis 7.2 in a Coolify service. Four persistent volumes contain configuration, uploaded media, PostgreSQL state and Redis state.
+## Current deployment
 
-Target: Postiz v2.25.3 built in GitHub Actions and pulled as a commit-tagged GitHub Container Registry image from deploy/arkx, managed by the existing Ark-x-AI-Lab Coolify GitHub App. This version additionally requires Temporal for scheduling. Its database and workflow state must be backed up consistently. A second active publisher must never run against production state during rehearsal.
+The GitHub-built Postiz v2.25.3 replacement serves `postiz.arkx.group`, with checked analytics source `d7a1911508da31fc20ea42a51c1bb2f4f38a7f31`. Coolify manages the replacement application and its PostgreSQL, Redis and Temporal infrastructure. The old v2.10.1 service is retired; its four original configuration/media/database/Redis volumes and coherent recovery backup remain. This is retained recovery data, not a second active publisher.
 
-Secrets remain in Coolify runtime environment variables. Git holds source, build/deployment definitions and operational instructions only. Postiz upstream is retained as the upstream Git remote. The existing live domain and Studio's publisher API contract are retained at cutover.
+The repository's deployment branch is `deploy/arkx`. GitHub Actions builds and checks an immutable `ghcr.io/ark-x-ai-lab/postiz-app:sha-${SOURCE_COMMIT}` image off-host; Coolify pulls the exact image through the existing GitHub App. Automatic deployment is disabled. Feature branches do not deploy. Check the actual image/source receipt rather than a branch name before release acceptance.
 
-Database-schema upgrades occur during the upstream startup sequence. Reverting only the image is not a proven rollback: retain a coherent pre-upgrade database/media/configuration recovery point and stop the replacement before restoring the old stack.
+## Runtime boundaries
 
-The candidate is connected through the existing GitHub App; automatic deployment is disabled. A coherent backup and isolated PostgreSQL restore have passed. The initial candidate schema test failed because the first source-built image lacked the Prisma schema engine and attempted a runtime download into a read-only directory. The replacement GitHub image passes the offline engine check and the database-only upgrade, idempotence and original-backup restoration tests. All original values across 45 tables were preserved. Runtime topology/readiness, full application recovery and cutover remain open. Server source builds are stopped because disk space became constrained; the replacement pipeline builds off-host.
+Provider credentials and signing/encryption configuration remain runtime-only. Git holds source, build definitions and operational instructions. A dedicated read-only registry credential has its own protected Docker configuration; it is excluded from image builds, app environments and the shared server login.
 
-The fork retains the legacy `User.marketplace Boolean @default(true)` schema field from v2.10.1. Upstream v2.25.3 removed it; retaining it avoids intentionally dropping the column during guarded schema synchronization. This is a compatibility preservation change, not a new product option. The real database delta and restored-data startup still require rehearsal.
+Compose commands resolve from the repository root with `--project-directory .`, matching Coolify's generated root environment file. Preparation removes recognized global environment-file injection and Coolify's shared external network from infrastructure services while preserving their internal networks and publisher routing. Unknown network shapes fail closed. Production Temporal uses the pinned image's built-in `config/dynamicconfig/docker.yaml`, with no host dynamic-configuration mount.
 
-All deployment paths resolve from the repository root. The application image uses `ghcr.io/ark-x-ai-lab/postiz-app:sha-${SOURCE_COMMIT}`. Temporal's bind source is `./deploy/arkx/dynamicconfig`, and custom commands explicitly use `--project-directory .`. This also matches Coolify's generated root `.env`; using the nested deployment directory caused the first infrastructure startup to fail before any candidate container started.
+The guarded startup wrapper starts nginx, runs the installed Prisma schema command, then replaces itself with foreground PM2 supervising three direct Node entrypoints: backend, orchestrator and frontend. It avoids orphaned pnpm/dotenv child chains. Restart checks must inspect process ownership and stable restart counts as well as HTTP health.
 
-The image package stays private. A dedicated read-only registry credential is isolated from the server-wide login and excluded from both image builds and app/container environments. Only the pull operation receives its separate protected Docker configuration.
+## Data and recovery
 
-Coolify’s generated global environment-file injection is removed before startup while retaining its service labels and routing metadata. The startup transformation preserves explicit per-service environment ownership; runtime variables are used for interpolation rather than passed to every container. Default startup still excludes the publishing application.
+Cutover preserved original values across 45 tables; the upgraded schema has 88 tables. Redis 7 keys and 3 media files matched. The fork retains the legacy `User.marketplace Boolean @default(true)` field to avoid dropping the old column during guarded synchronization; it is not a new product feature.
+
+Prisma client generation alone does not prove the CLI engine is bundled. The built image must pass offline, unprivileged schema/client engine checks. Schema upgrades run through the normal startup command. Reverting only the image is not a proven rollback: stop the replacement and restore a coherent pre-upgrade database/media/configuration point. Independent old-image API recovery passed; full old-version UI recovery remains unproven.
+
+## Private sign-in
+
+Public registration stays disabled. The local [private-registration correction](../plans/private-registration.md) removes bootstrap/generic-provider exceptions and rejects unknown provider callbacks before returning registration tokens. Existing linked provider accounts and activated local accounts retain their current login methods. No email-based linking or new staff allowlist is introduced. This correction is not deployed yet; existing runtime configuration and account authorization still require separate release checks.
+
+## Next release
+
+The Facebook summary-counter image passed its source build and offline checks but is not deployed. Private-registration changes are under local development on a separate branch. Limited host capacity currently holds new publisher pulls and Studio builds. Docker size fields do not guarantee reclaimable space; only an approved exact cleanup followed by a measured readback can establish recovered headroom. No database, media, backup or shared-volume deletion is part of these patches.
