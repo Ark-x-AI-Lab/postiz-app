@@ -89,6 +89,7 @@ model User {
   isSuperAdmin          Boolean              @default(false)
   bio                   String?
   audience              Int                  @default(0)
+  marketplace           Boolean              @default(true)
   pictureId             String?
   providerId            String?
   timezone              Int

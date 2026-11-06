@@ -1,0 +1,46 @@
+name: Ark-x deployment build check
+
+on:
+  push:
+    branches: [deploy/arkx]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkx-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deployment definitions
+        run: |
+          docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
+          docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
+          python3 deploy/arkx/preflight.py
+          sh -n deploy/arkx/runtime-start.sh
+      - name: Prove private files are excluded from the build context
+        env:
+          DOCKER_BUILDKIT: '1'
+        run: |
+          test ! -e .env.context-probe
+          test ! -e deploy/arkx/.env.context-probe
+          test ! -e deploy/arkx/context-probe.key
+          printf 'synthetic-context-probe' > .env.context-probe
+          printf 'synthetic-context-probe' > deploy/arkx/.env.context-probe
+          printf 'synthetic-context-probe' > deploy/arkx/context-probe.key
+          printf 'FROM scratch\nCOPY . /source\n' > "$RUNNER_TEMP/context-probe.Dockerfile"
+          docker build --file "$RUNNER_TEMP/context-probe.Dockerfile" --output "type=local,dest=$RUNNER_TEMP/context-export" .
+          test ! -e "$RUNNER_TEMP/context-export/source/.env.context-probe"
+          test ! -e "$RUNNER_TEMP/context-export/source/deploy/arkx/.env.context-probe"
+          test ! -e "$RUNNER_TEMP/context-export/source/deploy/arkx/context-probe.key"
+          test -f "$RUNNER_TEMP/context-export/source/.env.example"
+          test -f "$RUNNER_TEMP/context-export/source/deploy/arkx/.env.example"
+          rm .env.context-probe deploy/arkx/.env.context-probe deploy/arkx/context-probe.key
+      - name: Build the source without production credentials
+        run: docker build --file Dockerfile.dev --build-arg NEXT_PUBLIC_VERSION=v2.25.3 --tag arkx-postiz-check:${{ github.sha }} .

@@ -1,0 +1,264 @@
+{
+  "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production",
+  "services": {
+    "postiz": {
+      "profiles": [
+        "production"
+      ],
+      "build": {
+        "context": "../..",
+        "dockerfile": "Dockerfile.dev",
+        "args": {
+          "NEXT_PUBLIC_VERSION": "v2.25.3"
+        }
+      },
+      "command": [
+        "sh",
+        "/app/deploy/arkx/runtime-start.sh"
+      ],
+      "restart": "unless-stopped",
+      "environment": {
+        "ARKX_RUNTIME": "${ARKX_RUNTIME:?Set ARKX_RUNTIME in the runtime environment}",
+        "MAIN_URL": "${ARKX_PUBLIC_URL:?Set ARKX_PUBLIC_URL in the runtime environment}",
+        "FRONTEND_URL": "${ARKX_PUBLIC_URL:?Set ARKX_PUBLIC_URL in the runtime environment}",
+        "NEXT_PUBLIC_BACKEND_URL": "${ARKX_PUBLIC_URL:?Set ARKX_PUBLIC_URL in the runtime environment}/api",
+        "JWT_SECRET": "${JWT_SECRET:?Set JWT_SECRET in the runtime environment}",
+        "DATABASE_URL": "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in the runtime environment}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the runtime environment}@postiz-postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in the runtime environment}",
+        "REDIS_URL": "redis://postiz-redis:6379",
+        "BACKEND_INTERNAL_URL": "http://localhost:3000",
+        "TEMPORAL_ADDRESS": "temporal:7233",
+        "IS_GENERAL": "true",
+        "DISABLE_REGISTRATION": "true",
+        "STORAGE_PROVIDER": "local",
+        "UPLOAD_DIRECTORY": "/uploads",
+        "NEXT_PUBLIC_UPLOAD_DIRECTORY": "/uploads",
+        "NX_ADD_PLUGINS": "false",
+        "FACEBOOK_APP_ID": "${FACEBOOK_APP_ID:?Set FACEBOOK_APP_ID in the runtime environment}",
+        "FACEBOOK_APP_SECRET": "${FACEBOOK_APP_SECRET:?Set FACEBOOK_APP_SECRET in the runtime environment}",
+        "LINKEDIN_CLIENT_ID": "${LINKEDIN_CLIENT_ID:?Set LINKEDIN_CLIENT_ID in the runtime environment}",
+        "LINKEDIN_CLIENT_SECRET": "${LINKEDIN_CLIENT_SECRET:?Set LINKEDIN_CLIENT_SECRET in the runtime environment}",
+        "YOUTUBE_CLIENT_ID": "${YOUTUBE_CLIENT_ID:?Set YOUTUBE_CLIENT_ID in the runtime environment}",
+        "YOUTUBE_CLIENT_SECRET": "${YOUTUBE_CLIENT_SECRET:?Set YOUTUBE_CLIENT_SECRET in the runtime environment}"
+      },
+      "expose": [
+        "5000"
+      ],
+      "volumes": [
+        "postiz-config:/config",
+        "postiz-uploads:/uploads"
+      ],
+      "networks": [
+        "postiz-network",
+        "temporal-network",
+        "app-egress"
+      ],
+      "depends_on": {
+        "postiz-postgres": {
+          "condition": "service_healthy"
+        },
+        "postiz-redis": {
+          "condition": "service_healthy"
+        },
+        "temporal": {
+          "condition": "service_started"
+        }
+      }
+    },
+    "postiz-postgres": {
+      "image": "postgres:14.5",
+      "restart": "unless-stopped",
+      "networks": [
+        "postiz-network"
+      ],
+      "environment": {
+        "POSTGRES_USER": "${POSTGRES_USER:?Set POSTGRES_USER in the runtime environment}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the runtime environment}",
+        "POSTGRES_DB": "${POSTGRES_DB:?Set POSTGRES_DB in the runtime environment}"
+      },
+      "volumes": [
+        "postiz-postgres:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10,
+        "start_period": "20s"
+      }
+    },
+    "postiz-redis": {
+      "image": "redis:7.2",
+      "restart": "unless-stopped",
+      "networks": [
+        "postiz-network"
+      ],
+      "volumes": [
+        "postiz-redis:/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "temporal-elasticsearch": {
+      "image": "elasticsearch:7.17.27",
+      "restart": "unless-stopped",
+      "networks": [
+        "temporal-network"
+      ],
+      "environment": {
+        "cluster.routing.allocation.disk.threshold_enabled": "true",
+        "cluster.routing.allocation.disk.watermark.low": "512mb",
+        "cluster.routing.allocation.disk.watermark.high": "256mb",
+        "cluster.routing.allocation.disk.watermark.flood_stage": "128mb",
+        "discovery.type": "single-node",
+        "ES_JAVA_OPTS": "-Xms256m -Xmx256m",
+        "xpack.security.enabled": "false"
+      },
+      "volumes": [
+        "temporal-elasticsearch:/usr/share/elasticsearch/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "curl -fsS \"http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s\" >/dev/null"
+        ],
+        "interval": "10s",
+        "timeout": "10s",
+        "retries": 20,
+        "start_period": "30s"
+      }
+    },
+    "temporal-postgresql": {
+      "image": "postgres:16",
+      "restart": "unless-stopped",
+      "networks": [
+        "temporal-network"
+      ],
+      "environment": {
+        "POSTGRES_USER": "${TEMPORAL_POSTGRES_USER:?Set TEMPORAL_POSTGRES_USER in the runtime environment}",
+        "POSTGRES_PASSWORD": "${TEMPORAL_POSTGRES_PASSWORD:?Set TEMPORAL_POSTGRES_PASSWORD in the runtime environment}",
+        "POSTGRES_DB": "temporal"
+      },
+      "volumes": [
+        "temporal-postgresql:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10,
+        "start_period": "20s"
+      }
+    },
+    "temporal": {
+      "image": "temporalio/auto-setup:1.28.1",
+      "restart": "unless-stopped",
+      "networks": [
+        "temporal-network"
+      ],
+      "depends_on": {
+        "temporal-postgresql": {
+          "condition": "service_healthy"
+        },
+        "temporal-elasticsearch": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "DB": "postgres12",
+        "DB_PORT": "5432",
+        "POSTGRES_USER": "${TEMPORAL_POSTGRES_USER:?Set TEMPORAL_POSTGRES_USER in the runtime environment}",
+        "POSTGRES_PWD": "${TEMPORAL_POSTGRES_PASSWORD:?Set TEMPORAL_POSTGRES_PASSWORD in the runtime environment}",
+        "POSTGRES_SEEDS": "temporal-postgresql",
+        "DYNAMIC_CONFIG_FILE_PATH": "config/dynamicconfig/development-sql.yaml",
+        "ENABLE_ES": "true",
+        "ES_SEEDS": "temporal-elasticsearch",
+        "ES_VERSION": "v7",
+        "TEMPORAL_NAMESPACE": "default"
+      },
+      "volumes": [
+        "./dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
+      ]
+    },
+    "temporal-admin-tools": {
+      "image": "temporalio/admin-tools:1.28.1-tctl-1.18.4-cli-1.4.1",
+      "restart": "unless-stopped",
+      "networks": [
+        "temporal-network"
+      ],
+      "environment": {
+        "TEMPORAL_ADDRESS": "temporal:7233",
+        "TEMPORAL_CLI_ADDRESS": "temporal:7233"
+      },
+      "stdin_open": true,
+      "tty": true,
+      "depends_on": {
+        "temporal": {
+          "condition": "service_started"
+        }
+      }
+    },
+    "temporal-ui": {
+      "image": "temporalio/ui:2.34.0",
+      "restart": "unless-stopped",
+      "networks": [
+        "temporal-network"
+      ],
+      "environment": {
+        "TEMPORAL_ADDRESS": "temporal:7233",
+        "TEMPORAL_CORS_ORIGINS": "http://127.0.0.1:3000"
+      },
+      "depends_on": {
+        "temporal": {
+          "condition": "service_started"
+        }
+      }
+    }
+  },
+  "volumes": {
+    "postiz-postgres": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-postiz-postgres"
+    },
+    "postiz-redis": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-postiz-redis"
+    },
+    "temporal-postgresql": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-temporal-postgresql"
+    },
+    "temporal-elasticsearch": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-temporal-elasticsearch"
+    },
+    "postiz-config": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-postiz-config"
+    },
+    "postiz-uploads": {
+      "name": "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-production-postiz-uploads"
+    }
+  },
+  "networks": {
+    "postiz-network": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "temporal-network": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "app-egress": {
+      "driver": "bridge"
+    }
+  }
+}

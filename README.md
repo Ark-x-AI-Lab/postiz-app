@@ -1,3 +1,25 @@
+# Postiz · Ark-x maintained fork
+
+**Publishing engine behind Social Studio, maintained and deployed from this repository.**
+
+| Item | Current state |
+| --- | --- |
+| Status | Migration prepared; existing v2.10.1 service remains live |
+| Live service | https://postiz.arkx.group |
+| Owner | Ark-x AI Lab |
+| Fork started | 6 November 2026 |
+| Deployment branch | `deploy/arkx`, based on upstream `v2.25.3` |
+
+The team creates content in Studio; Postiz connects channels, schedules approved posts and reports delivery. This fork gives us a reproducible place for patches and safe diagnostics. It does not replace Studio or automatically upgrade the live service.
+
+[Product and progress](docs/PRODUCT.md) · [Architecture](docs/architecture.md) · [Migration plan](plans/coolify-migration.md)
+
+For local development, follow the upstream instructions below and use PNPM. Never copy production credentials into the checkout. Runtime secrets belong in Coolify. Clone changes onto a working branch, review them, then merge into `deploy/arkx`; the intended deployment uses the Ark-x-AI-Lab Coolify GitHub App. The replacement connection is not yet configured.
+
+Upstream notices and instructions follow, unchanged.
+
+---
+
 <p align="center">
   <a href="https://postiz.com/" target="_blank">
   <picture>

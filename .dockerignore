@@ -21,3 +21,22 @@ dist
 .git
 .github
 reports
+# Runtime configuration and private operational material never enter builds.
+.env
+.env.*
+!.env.example
+.codex
+.secrets
+*.pem
+*.key
+BRAIN.md
+
+# Match nested runtime/private files as well as root files.
+**/.env
+**/.env.*
+!**/.env.example
+**/.codex
+**/.secrets
+**/*.pem
+**/*.key
+**/BRAIN.md
