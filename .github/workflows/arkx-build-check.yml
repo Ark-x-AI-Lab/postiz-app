@@ -30,6 +30,11 @@ jobs:
           bash -n deploy/arkx/pull-image.sh
           bash -n deploy/arkx/start-stack.sh
           node --check deploy/arkx/prepare-compose.cjs
+      - name: Check the deployed helper timeout utility
+        run: |
+          docker run --rm --network none --read-only --entrypoint sh \
+            coollabsio/coolify-helper@sha256:b0cf60e6d6ecc73696811fe105d7b187b0fa387bd8ec62c647177420daf42bad \
+            -c 'timeout -k 1s 1s true && { timeout -k 1s 1s sh -c '\''trap "" TERM; while :; do sleep 1; done'\''; result=$?; test "$result" -eq 137; }'
       - name: Prove private files are excluded from the build context
         env:
           DOCKER_BUILDKIT: '1'

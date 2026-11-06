@@ -53,7 +53,7 @@ if [[ -n "$checkout_commit" && "$checkout_commit" != "$selected_commit" ]]; then
   fail 'SOURCE_COMMIT differs from checkout HEAD; refusing to pull another revision.'
 fi
 command -v docker >/dev/null 2>&1 || fail 'Docker CLI is required.'
-command -v timeout >/dev/null 2>&1 || fail 'GNU timeout is required to enforce the ten-minute pull deadline.'
+command -v timeout >/dev/null 2>&1 || fail 'timeout with forced termination is required to enforce the ten-minute pull deadline.'
 
 registry_helper=${ARKX_REGISTRY_HELPER_IMAGE:-}
 registry_config=${ARKX_REGISTRY_CONFIG_DIR:-}
@@ -78,14 +78,14 @@ cleanup() {
     if [[ "$helper_id" =~ ^[0-9a-f]{64}$ ]]; then
       # --rm normally removed an exited helper already. An empty successful
       # listing proves absence; a failed listing never authorizes removal.
-      if ! present=$(timeout --kill-after=2s 10s docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
+      if ! present=$(timeout -k 2s 10s docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
         container ls --all --no-trunc --filter "id=$helper_id" --format '{{.ID}}' 2>/dev/null); then
         printf 'Helper presence check failed for %s; inspect privately before retrying.\n' "$helper_id" >&2
       elif [[ -z "$present" ]]; then
         :
       elif [[ "$present" != "$helper_id" ]]; then
         printf 'Helper cleanup refused an unexpected ID; inspect privately before retrying.\n' >&2
-      elif ! timeout --kill-after=2s 10s docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
+      elif ! timeout -k 2s 10s docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
         container rm --force "$helper_id" >/dev/null 2>&1; then
         printf 'Helper cleanup unconfirmed for %s; inspect privately before retrying.\n' "$helper_id" >&2
       fi
@@ -108,7 +108,7 @@ while :; do
   # Only this pinned helper can read the dedicated host config. Its network is
   # disabled; registry traffic is performed by the host Docker daemon via the
   # socket. --mount refuses a missing source instead of creating a directory.
-  if timeout --kill-after=2s "${remaining}s" docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
+  if timeout -k 2s "${remaining}s" docker --config "$work_dir/docker" --host unix:///var/run/docker.sock \
     run --rm --pull=never --network none --read-only --cap-drop=ALL \
     --security-opt no-new-privileges --user 0:0 --no-healthcheck --log-driver none \
     --cidfile "$work_dir/helper.cid" \
@@ -147,7 +147,7 @@ done
 
 remaining=$((deadline - SECONDS))
 ((remaining > 0)) || fail 'Image pull completed too late to verify its labels within ten minutes.'
-labels=$(timeout --kill-after=2s "${remaining}s" docker --config "$work_dir/docker" --host unix:///var/run/docker.sock image inspect \
+labels=$(timeout -k 2s "${remaining}s" docker --config "$work_dir/docker" --host unix:///var/run/docker.sock image inspect \
   --format '{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "org.opencontainers.image.source"}}' \
   "$image" 2>"$work_dir/inspect.log") || fail 'Cannot inspect the selected image labels; details withheld.'
 [[ "$labels" == "$selected_commit|$source_url" ]] || fail 'Image revision/source labels do not match the selected commit and fork.'

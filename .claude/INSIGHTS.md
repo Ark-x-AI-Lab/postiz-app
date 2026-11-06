@@ -6,3 +6,4 @@
 - Upstream session middleware can create a missing organization API key during `GET /user/self`. Do not describe that generic session check as read-only; prove the required state or use a read-only database role for a separate preserved-session test.
 - GNU `timeout` needs a bounded `--kill-after` to terminate a TERM-ignoring Docker client. Track and verify only the temporary helper’s exact container ID during cleanup.
 - Compose profiles can be enabled by inherited `COMPOSE_PROFILES`, including a selected dotenv file. Infrastructure-only startup explicitly clears that environment value; publisher selection requires both an explicit activation flag and production runtime intent.
+- Coolify helper 1.0.19 uses BusyBox timeout, not GNU coreutils. Both support `timeout -k SECONDS`; BusyBox rejects GNU’s long `--kill-after` option. Test shell utilities in the actual helper image, not only on the host.
