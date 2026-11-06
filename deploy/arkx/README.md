@@ -1,6 +1,6 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status: reviewed candidate; isolated GitHub source image build and context-privacy checks passed. No stack startup or live migration has occurred. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
+Status: candidate path correction after the operator-reported Coolify 4.6.0 source build succeeded but startup failed: generated per-service `env_file: .env` resolved under `deploy/arkx` instead of the checkout root. Stack readiness and live migration remain unproven. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
 
 ## Files and choices
 
@@ -33,8 +33,8 @@ From the repository root, review-only checks (no daemon needed):
 
 ```sh
 python3 deploy/arkx/preflight.py
-docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
-docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
+docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
+docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
 sh -n deploy/arkx/runtime-start.sh
 ```
 
@@ -42,7 +42,7 @@ For a future authorized first creation, with actual values already supplied secu
 
 ```sh
 python3 deploy/arkx/preflight.py --mode rehearsal --check-new-volumes
-docker compose --env-file /dev/null -f deploy/arkx/compose.rehearsal.yaml up -d
+docker compose --project-directory . --env-file /dev/null -f deploy/arkx/compose.rehearsal.yaml up -d
 ```
 
 This creates infrastructure only. It is **not a Postiz schema rehearsal**, restored-data rehearsal, browser rehearsal, or proof that imported schedules will not publish. Do not merge this file with the production file to rehearse. No claimed application outbound isolation has been tested. A future actual application rehearsal needs separately proven outbound controls before any backend/orchestrator process starts.
@@ -51,21 +51,30 @@ Future production activation is a separate explicit choice with real sends possi
 
 ```sh
 python3 deploy/arkx/preflight.py --mode production --check-new-volumes
-docker compose --env-file /dev/null -f deploy/arkx/compose.production.yaml --profile production up -d --build
+docker compose --project-directory . --env-file /dev/null -f deploy/arkx/compose.production.yaml --profile production up -d --build
 ```
 
-That command requires runtime `ARKX_RUNTIME=production`. In Coolify, the selected production runtime must explicitly apply **`--profile production`** to the Compose startup invocation, plus provide that runtime environment value. The candidate does not assume Coolify activates profiles automatically. Leave the GitHub-connected resource paused until main confirms its actual command/profile handling. Selecting the production file without the profile leaves the publisher stopped. Giving the wrong runtime value exits the application with code 64 before nginx or Postiz starts.
+That command requires runtime `ARKX_RUNTIME=production`. In Coolify, the selected production runtime must explicitly apply **`--profile production`** to the Compose startup invocation, plus provide that runtime environment value. The candidate does not assume Coolify activates profiles automatically. Leave the GitHub-connected resource paused until the operator confirms its actual command/profile handling. Selecting the production file without the profile leaves the publisher stopped. Giving the wrong runtime value exits the application with code 64 before nginx or Postiz starts.
 
 ## Checks and remaining gaps
 
-The local check covers: exact service/image sets, zero published ports, application port, build arguments, named-volume separation, required secret interpolation, copied Temporal configuration, four denied startup selections, one allowed selection using stubs, Compose defaults/profiles, and rejection of missing required settings. Configuration rendering does not execute an image.
+The local check covers: exact service/image sets, zero published ports, application port, build arguments, named-volume separation, required secret interpolation, copied Temporal configuration, four denied startup selections, one allowed selection using stubs, Compose defaults/profiles, and rejection of missing required settings. In a temporary synthetic checkout, it also injects Coolify-style `env_file: .env` into every service in both files, proves normalized root build/bind/env-file paths and successful environment loading, and reproduces missing nested `.env` failures with the wrong project directory. No real checkout `.env` is created or read. Configuration rendering does not execute an image.
 
-Open target-side checks: unused volume names; available memory/disk; exact Coolify YAML/profile/proxy/build-time environment behavior; actual source image build; Temporal and application readiness; PostgreSQL 14.5 compatibility with the existing data and current schema; database restore and queue inspection; OAuth callback settings; first-account bootstrap and live application behavior. Temporal's dependency is service-started rather than API-ready, matching a candidate rather than proven healthy startup. No full-stack run or build-green claim is made. Main owns review, root documentation, workflow, Git operations, and Coolify.
+Open target-side checks: unused volume names; available memory/disk; exact Coolify YAML/profile/proxy/build-time environment behavior after this path correction; Temporal and application readiness; PostgreSQL 14.5 compatibility with the existing data and current schema; database restore and queue inspection; OAuth callback settings; first-account bootstrap and live application behavior. Temporal's dependency is service-started rather than API-ready, matching a candidate rather than proven healthy startup. No full-stack run or build-green claim is made for this patch. The operator owns root documentation, Git operations, and Coolify; the scoped workflow correction only adds explicit root flags.
 
 Lesson: a production profile alone does not block an explicitly targeted service. The runtime command guard closes that accidental path; rehearsal omits the application entirely.
 
-Coolify working-directory note: the source build context and configuration bind mount are relative to this directory. The prepared Coolify custom build/start commands must set `--project-directory ./deploy/arkx` explicitly from the repository checkout root, rather than accepting Coolify's automatic project-directory override. Target-side resolution remains an acceptance check before any activation.
+Coolify working-directory correction: all paths use the **repository root** as their coordinate base. The production application build context is `.`, and both Temporal binds are `./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro`. From the checkout root, the deployment uses these custom commands (Coolify supplies the selected compose file and generated environment):
+
+```sh
+docker compose --project-directory . --profile production build
+docker compose --project-directory . up -d
+```
+
+Do not use `--project-directory ./deploy/arkx`: Coolify's generated per-service `.env` then resolves to the missing `deploy/arkx/.env`, even when its CLI `--env-file` points at the root `.env`. The build profile selects the application for building only; the custom start command above does not itself activate that profile. The startup profile and exact `ARKX_RUNTIME=production` guard remain in place. The operator owns deliberate activation and target-side confirmation. Local commands must likewise pass `--project-directory .` from the checkout root, or an absolute checkout-root path from elsewhere. Keep generated runtime secrets out of the source build as required above.
 
 Review correction: Elasticsearch uses its standard `/usr/share/elasticsearch/data` persistence path in both candidates. The upstream sample's alternative mount path was not retained. Container-recreation persistence remains a runtime check.
 
 Migration compatibility: the existing signing secret is preserved exactly. The preflight requires a nonblank value rather than a new-secret length policy; changing a working legacy secret to satisfy a template would invalidate preserved authentication/encryption. Exact source-to-candidate equality is checked privately at configuration transfer and must be rechecked before activation.
+
+The path regression check covers both Compose files: repository-root configuration succeeds, while the nested-directory alternative fails before startup. It checks all generated service environment files, the source-build context and the read-only Temporal configuration bind. Effective Coolify startup remains a live acceptance check.

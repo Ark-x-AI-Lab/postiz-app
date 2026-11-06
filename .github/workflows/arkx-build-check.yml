@@ -20,8 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check deployment definitions
         run: |
-          docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
-          docker compose --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
+          docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
+          docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
           python3 deploy/arkx/preflight.py
           sh -n deploy/arkx/runtime-start.sh
       - name: Prove private files are excluded from the build context

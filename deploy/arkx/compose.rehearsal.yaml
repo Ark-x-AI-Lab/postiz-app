@@ -127,7 +127,7 @@
         "TEMPORAL_NAMESPACE": "default"
       },
       "volumes": [
-        "./dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
+        "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
       ]
     },
     "temporal-admin-tools": {

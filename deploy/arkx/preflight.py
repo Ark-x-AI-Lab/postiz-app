@@ -56,7 +56,7 @@ def static_checks():
                 need(service["image"] == IMAGES[name], f"Upstream image drift: {name}")
             for mount in service.get("volumes", []):
                 source = mount.split(":")[0]
-                need(source in data["volumes"] or mount == "./dynamicconfig:/etc/temporal/config/dynamicconfig:ro",
+                need(source in data["volumes"] or mount == "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro",
                      f"Unexpected mount: {mode}/{name}")
         for key, volume in data["volumes"].items():
             expected = "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-" + mode + "-" + key
@@ -72,7 +72,7 @@ def static_checks():
     need(app["profiles"] == ["production"], "Publisher profile guard missing")
     need(app["expose"] == ["5000"], "App internal port must be 5000")
     need(app["command"] == ["sh", "/app/deploy/arkx/runtime-start.sh"], "Startup guard missing")
-    need(app["build"] == {"context": "../..", "dockerfile": "Dockerfile.dev", "args": {"NEXT_PUBLIC_VERSION": "v2.25.3"}},
+    need(app["build"] == {"context": ".", "dockerfile": "Dockerfile.dev", "args": {"NEXT_PUBLIC_VERSION": "v2.25.3"}},
          "Build must use unchanged source Dockerfile with only public version argument")
     need(app["environment"]["DISABLE_REGISTRATION"] == "true", "Registration must be disabled")
     need(OAUTH <= set(app["environment"]), "Selected provider settings missing")
@@ -105,8 +105,71 @@ def guard_checks():
 
 
 def compose(mode, env, *options):
-    return subprocess.run(["docker", "compose", "--env-file", os.devnull, "-f", str(HERE / f"compose.{mode}.yaml"),
+    return subprocess.run(["docker", "compose", "--project-directory", str(ROOT),
+                           "--env-file", os.devnull, "-f", str(HERE / f"compose.{mode}.yaml"),
                            *options], env=env, capture_output=True, text=True)
+
+
+def compose_path_checks(env):
+    # Reproduce Coolify's generated per-service env_file without real checkout secrets.
+    with tempfile.TemporaryDirectory(prefix="arkx-postiz-paths-") as tmp:
+        root = Path(tmp).resolve()
+        nested = root / "deploy/arkx"
+        dynamic = nested / "dynamicconfig"
+        dynamic.mkdir(parents=True)
+        shutil.copyfile(HERE / "dynamicconfig/development-sql.yaml", dynamic / "development-sql.yaml")
+        (root / ".env").write_text("ARKX_PATH_PROBE=synthetic-validation-only\n")
+        for mode in ("rehearsal", "production"):
+            data = load(mode)
+            for service in data["services"].values():
+                service["env_file"] = [".env"]
+            path = nested / f"compose.{mode}.yaml"
+            path.write_text(json.dumps(data))
+
+            def render(project, *options):
+                return subprocess.run(
+                    ["docker", "compose", "-f", str(path), "--env-file", str(root / ".env"),
+                     "--project-directory", str(project), "--profile", "production",
+                     "config", "--format", "json", *options],
+                    cwd=root, env=env, capture_output=True, text=True)
+
+            result = render(root, "--no-env-resolution")
+            need(result.returncode == 0, f"Root {mode} path normalization failed")
+            services = json.loads(result.stdout)["services"]
+            for name, service in services.items():
+                files = service["env_file"]
+                need(len(files) == 1 and files[0]["path"] == str(root / ".env")
+                     and files[0].get("required", True) is True,
+                     f"Root {mode}/{name} env_file resolved outside checkout root")
+            mount = next(v for v in services["temporal"]["volumes"]
+                         if v["target"] == "/etc/temporal/config/dynamicconfig")
+            need(mount["type"] == "bind" and mount["source"] == str(dynamic)
+                 and mount["read_only"] is True, f"Root {mode} dynamic configuration bind is wrong")
+            if mode == "production":
+                need(services["postiz"]["build"]["context"] == str(root),
+                     "Root source build context is not the checkout root")
+            result = render(root)
+            need(result.returncode == 0, f"Root {mode} generated env_file resolution failed")
+            need(all(s["environment"].get("ARKX_PATH_PROBE") == "synthetic-validation-only"
+                     for s in json.loads(result.stdout)["services"].values()),
+                 f"Root {mode} generated env_file was not loaded for every service")
+            result = render(nested, "--no-env-resolution")
+            need(result.returncode == 0, f"Nested {mode} negative-control normalization failed")
+            services = json.loads(result.stdout)["services"]
+            need(all(s["env_file"][0]["path"] == str(nested / ".env") for s in services.values()),
+                 f"Nested {mode} did not reproduce the wrong env_file base")
+            mount = next(v for v in services["temporal"]["volumes"]
+                         if v["target"] == "/etc/temporal/config/dynamicconfig")
+            need(mount["source"] == str(nested / "deploy/arkx/dynamicconfig"),
+                 f"Nested {mode} did not reproduce the wrong bind base")
+            if mode == "production":
+                need(services["postiz"]["build"]["context"] == str(nested),
+                     "Nested negative control did not reproduce the wrong build context")
+            result = render(nested)
+            need(result.returncode != 0 and str(nested / ".env") in result.stderr
+                 and "no such file" in result.stderr.lower(),
+                 f"Nested {mode} must reject missing generated env_file")
+    print("PASS: both Coolify-generated env_file fixtures resolve from repository root; build/bind/env_file paths match; nested project directory fails on missing .env")
 
 
 def compose_checks():
@@ -131,6 +194,7 @@ def compose_checks():
         result = compose(mode, blocked_env, "config", "--quiet")
         need(result.returncode != 0, f"Missing {mode} required setting accepted")
     print("PASS: Compose renders both files; defaults exclude publisher; production profile selects it only in production; missing required settings rejected")
+    compose_path_checks(env)
 
 
 def environment_checks(mode, check_new):

@@ -13,3 +13,5 @@ Approved direction: Mounssif, 6 November 2026. Work is in progress, not deployed
 GitHub App repository access and paused resource creation are confirmed; source build and privacy checks pass. Open prerequisites: available resources at activation time, backup/restore path and runtime Temporal/application topology. No local dependency installation or Docker image pull on the nearly full laptop.
 
 Source preflight: the target recovery workflow only scans eligible already-overdue posts from the previous two days, and requires RUN_CRON. Do not rely on it to transfer future schedules. Inventory and reconcile every pending schedule; preserve old Redis recovery state. The fork retains the old User.marketplace field; normal schema guards remain enabled, with no accept-data-loss/reset flags.
+
+First server build completed, including an offline image check showing no runtime secret variables or root `.env` inside the artifact. The initial infrastructure start failed on Coolify's generated relative environment-file path. A coordinated root-path correction and blocked/allowed synthetic regression are prepared; repeat the live infrastructure startup before restoring data.

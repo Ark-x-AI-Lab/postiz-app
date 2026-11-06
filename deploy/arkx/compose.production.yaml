@@ -6,7 +6,7 @@
         "production"
       ],
       "build": {
-        "context": "../..",
+        "context": ".",
         "dockerfile": "Dockerfile.dev",
         "args": {
           "NEXT_PUBLIC_VERSION": "v2.25.3"
@@ -190,7 +190,7 @@
         "TEMPORAL_NAMESPACE": "default"
       },
       "volumes": [
-        "./dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
+        "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
       ]
     },
     "temporal-admin-tools": {
