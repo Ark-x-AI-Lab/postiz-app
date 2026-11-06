@@ -342,7 +342,8 @@
       "viem>ws": "^8.22.0"
     },
     "onlyBuiltDependencies": [
-      "bcrypt"
+      "bcrypt",
+      "canvas"
     ]
   }
 }

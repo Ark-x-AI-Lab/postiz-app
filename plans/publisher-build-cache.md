@@ -2,7 +2,7 @@
 
 Status: local preparation; no cold/warm build or speedup established.
 
-The source image currently installs dependencies after every included source change. The next recipe separates locked package downloads from application source, then keeps normal install scripts, Prisma generation and compilation after the source copy. Node22.23.4, pnpm10.6.1, Linux/amd64 and dependency build approvals remain unchanged.
+The source image currently installs dependencies after every included source change. The next recipe separates locked package downloads from application source, then keeps workspace installation, explicitly rebuilds the two approved native packages, and retains Prisma generation and compilation after the source copy. Node22.23.4, pnpm10.6.1, Linux/amd64 and dependency build approvals remain unchanged.
 
 Only a dependency-stage cache is exported to GitHub Actions. It includes build tools and public package inputs; the full application build is not exported as a second large cache. A fixed platform/package-manager scope permits reuse between builds of the same branch. GitHub's branch access rules still apply. The cache is an optimization, never the source selector: full commit image tags and source labels remain mandatory.
 
@@ -19,3 +19,7 @@ Only a dependency-stage cache is exported to GitHub Actions. It includes build t
 References: [pnpm10 fetch](https://pnpm.io/10.x/cli/fetch), [Docker GitHub Actions cache](https://docs.docker.com/build/cache/backends/gha/). Cache confidentiality, quotas/eviction and the actual cold/warm results remain part of acceptance; no guaranteed build-time or cost reduction is claimed.
 
 Cheap pinned checks passed under Node22.23.4/pnpm10.6.1: fetch accepts the chosen options and skips the synthetic project hook; offline install runs that hook; an empty-store package install fails specifically with the offline-package-missing error. This is option/hook/refusal proof, not cold/warm performance. A D7 baseline probe found bcrypt/sharp load but canvas lacks its native binding; that separate existing compatibility gap remains open before final native acceptance.
+
+## Observed lifecycle correction
+
+The initial cold image build passed, and a later fresh runner reported the fetch instruction cached. The new native gate then correctly blocked publication for missing canvas. A separate pinned dependency fixture proved why normal offline install alone was insufficient: the approved dependency hook stayed pending despite two successful commands. Named rebuild fixes that case while respecting the approval list and leaving the root project hook at one execution. The recipe now explicitly rebuilds only `bcrypt` and `canvas` after offline installation. The repaired actual image must still pass all native tests; this fixture is not canvas acceptance.

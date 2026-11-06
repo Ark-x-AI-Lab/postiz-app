@@ -109,3 +109,7 @@ The removed `.next/cache/turbopack` directory held 572 MB in the previous image;
 ## Dependency cache preparation
 
 The local [cache plan](../../plans/publisher-build-cache.md) separates locked package downloads from source compilation and exports only that dependency stage. `python3 deploy/arkx/test_build_inputs.py` exercises accepted public settings and rejected private/unreviewed configuration. `preflight.py` checks the actual `.npmrc` before a cache-enabled build. Install scripts and all final-image gates remain enabled. Cold/warm build acceptance is still pending; do not report a measured speedup yet.
+
+## Native graphics acceptance
+
+The source approval list adds only `canvas` alongside `bcrypt`; dependency versions remain locked. After frozen offline install, the recipe explicitly runs `pnpm rebuild bcrypt canvas --store-dir=/pnpm/store`: the pinned fixture confirmed that this respects approval and avoids replaying project hooks, unlike relying on install exit0 alone. The final-image `native-runtime.test.cjs` gate runs offline and unprivileged before publication, checking the actual PNG renderer, crypto module, sanitizer and installed DOM parsers. The old D7 image has a confirmed missing canvas binding; it is not an expected passing fixture. A repaired-image pass is required, and any missing native libraries must be diagnosed from the real build/load failure before changing the recipe. No production rebuild or posting proof follows from this local preparation.

@@ -29,7 +29,10 @@ ENV NEXT_PUBLIC_VERSION=$NEXT_PUBLIC_VERSION
 COPY . /app
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
-RUN pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store
+# Fetch leaves dependency scripts pending. Materialize only approved native builds,
+# without replaying the workspace's already-run project hooks.
+RUN pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store \
+ && pnpm rebuild bcrypt canvas --store-dir=/pnpm/store
 # Bundle the schema engine while build-time network access is available.
 RUN pnpm exec prisma --version
 RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
