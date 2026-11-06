@@ -50,6 +50,39 @@ def pinned_app_image(source_commit):
     return APP_IMAGE_PREFIX + source_commit
 
 
+
+def validate_public_pnpm_config(text):
+    """Only reviewed public settings may enter the exported dependency cache."""
+    need(len(text.encode("utf-8")) <= 8192, "Package-manager configuration is too large; values withheld")
+    allowed = {
+        "ignore-workspace-root-check": {"true", "false"},
+        "node-linker": {"hoisted"},
+        "restrict-manifest-changes": {"true", "false"},
+        "sync-injected-deps-after-scripts[]": {"build"},
+        "inject-workspace-packages": {"true"},
+    }
+    seen = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        key, separator, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        need(separator and key in allowed and key not in seen,
+             "Unreviewed package-manager configuration; values withheld")
+        need(value in allowed[key], "Unreviewed package-manager setting value; values withheld")
+        seen.add(key)
+    need(seen == set(allowed), "Required public package-manager settings missing; values withheld")
+
+
+def public_build_input_checks():
+    config = ROOT / ".npmrc"
+    need(not config.is_symlink() and config.is_file(), "Package-manager configuration must be a regular file")
+    need(config.stat().st_size <= 8192, "Package-manager configuration is too large; values withheld")
+    validate_public_pnpm_config(config.read_text(encoding="utf-8"))
+    print("PASS: five reviewed public package-manager settings; no unreviewed cache configuration")
+
+
 def static_checks():
     for mode in ("rehearsal", "production"):
         data = load(mode)
@@ -296,6 +329,7 @@ def main():
     parser.add_argument("--check-new-volumes", action="store_true")
     args = parser.parse_args()
     need(not args.check_new_volumes or args.mode, "--check-new-volumes requires --mode")
+    public_build_input_checks()
     static_checks()
     guard_checks()
     ecosystem_checks()

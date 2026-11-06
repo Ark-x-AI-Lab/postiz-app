@@ -26,6 +26,7 @@ jobs:
         run: |
           docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.production.yaml config --quiet
           docker compose --project-directory . --env-file deploy/arkx/.env.example -f deploy/arkx/compose.rehearsal.yaml config --quiet
+          python3 deploy/arkx/test_build_inputs.py
           python3 deploy/arkx/preflight.py
           sh -n deploy/arkx/runtime-start.sh
           bash -n deploy/arkx/pull-image.sh
@@ -124,16 +125,36 @@ jobs:
           test -f "$RUNNER_TEMP/context-export/source/.env.example"
           test -f "$RUNNER_TEMP/context-export/source/deploy/arkx/.env.example"
           rm .env.context-probe deploy/arkx/.env.context-probe deploy/arkx/context-probe.key
+      - name: Set up the shared image builder
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Cache locked dependencies without application source
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: Dockerfile.dev
+          target: dependencies
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,version=2,scope=arkx-publisher-amd64-pnpm10
+          cache-to: type=gha,version=2,scope=arkx-publisher-amd64-pnpm10,mode=min
       - name: Build the source without production credentials
-        env:
-          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
-        run: |
-          docker build --platform linux/amd64 --file Dockerfile.dev \
-            --build-arg NEXT_PUBLIC_VERSION=v2.25.3 \
-            --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
-            --label org.opencontainers.image.source=https://github.com/Ark-x-AI-Lab/postiz-app \
-            --label org.opencontainers.image.licenses=AGPL-3.0-only \
-            --tag "$IMAGE" .
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: Dockerfile.dev
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_VERSION=v2.25.3
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/Ark-x-AI-Lab/postiz-app
+            org.opencontainers.image.licenses=AGPL-3.0-only
       - name: Prove Prisma is usable offline in the runtime image
         env:
           IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
@@ -211,7 +232,7 @@ jobs:
         run: |
           docker run --rm --network none --read-only --user 65534:65534 --entrypoint pnpm "$IMAGE" --version
           docker run --rm --network none --read-only --user 65534:65534 --entrypoint nginx "$IMAGE" -v
-          docker run --rm --network none --read-only --user 65534:65534 --entrypoint node "$IMAGE" -e "const fs=require('node:fs'); fs.accessSync('/usr/local/bin/pm2',fs.constants.X_OK); if(fs.existsSync('/app/apps/frontend/.next/cache/turbopack')) throw new Error('Build cache shipped'); for(const p of ['/app/apps/frontend/.next/server','/app/apps/frontend/.next/static']) if(!fs.existsSync(p)) throw new Error('Compiled frontend missing'); require('/usr/local/lib/node_modules/pm2/package.json'); require('@temporalio/worker'); require('sharp'); console.log('RUNTIME_MODULES_OK');"
+          docker run --rm --network none --read-only --user 65534:65534 --entrypoint node "$IMAGE" -e "const fs=require('node:fs'); fs.accessSync('/usr/local/bin/pm2',fs.constants.X_OK); if(fs.existsSync('/app/apps/frontend/.next/cache/turbopack')) throw new Error('Build cache shipped'); if(fs.existsSync('/pnpm/store')) throw new Error('Dependency download store shipped'); for(const p of ['/app/apps/frontend/.next/server','/app/apps/frontend/.next/static']) if(!fs.existsSync(p)) throw new Error('Compiled frontend missing'); require('/usr/local/lib/node_modules/pm2/package.json'); require('@temporalio/worker'); require('sharp'); console.log('RUNTIME_MODULES_OK');"
           set -o pipefail
           bytes=$(docker image save "$IMAGE" | wc -c)
           bytes=$(echo "$bytes" | tr -d '[:space:]')

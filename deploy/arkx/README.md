@@ -1,6 +1,6 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status — 6 November 2026: source d7a1911508da31fc20ea42a51c1bb2f4f38a7f31 is live at postiz.arkx.group. Three neutral test accounts published the approved scheduled post. The old service was retired with original volumes and recovery backup preserved. Automatic deploy remains disabled. The detailed candidate/rehearsal notes below are historical preparation evidence, not the current cutover status. Checked lifetime analytics passed pinned image and live read checks. A follow-up Facebook aggregate-summary patch is being prepared; it is not deployed.
+Status — 6 November 2026: source d7a1911508da31fc20ea42a51c1bb2f4f38a7f31 is live at postiz.arkx.group. Three neutral test accounts published the approved scheduled post. The old service was retired with original volumes and recovery backup preserved. Automatic deploy remains disabled. The detailed candidate/rehearsal notes below are historical preparation evidence, not the current cutover status. Checked lifetime analytics passed pinned image and live read checks. The combined Facebook aggregate-summary/private-registration image at source 3b3a7de passed its source build and 152 offline tests; it is not deployed. Isolated component-browser checks pass; full Next layout and live staff-login acceptance remain open.
 
 ## Files and choices
 
@@ -105,3 +105,7 @@ The runtime recipe now uses a separate final stage: all application dependencies
 Do not use `docker image inspect .Size` alone as a disk-capacity estimate with the current containerd image store: observed content size was about 1.6 GB while actual image disk use was about 6.9 GB. CI now streams `docker image save` into a byte count without saving another archive. The default uncompressed archive budget is 5,000,000,000 bytes; administrators can set the Actions variable `ARKX_MAX_IMAGE_ARCHIVE_BYTES` after reviewing host capacity. A pull still needs extra room for compressed content and healthy database operation. Recheck target disk capacity before deploying.
 
 The removed `.next/cache/turbopack` directory held 572 MB in the previous image; compiled `.next/server` and `.next/static` are preserved. [Next.js documents `.next/cache` as shared build cache](https://nextjs.org/docs/pages/guides/ci-build-caching). No production dependency pruning is performed.
+
+## Dependency cache preparation
+
+The local [cache plan](../../plans/publisher-build-cache.md) separates locked package downloads from source compilation and exports only that dependency stage. `python3 deploy/arkx/test_build_inputs.py` exercises accepted public settings and rejected private/unreviewed configuration. `preflight.py` checks the actual `.npmrc` before a cache-enabled build. Install scripts and all final-image gates remain enabled. Cold/warm build acceptance is still pending; do not report a measured speedup yet.

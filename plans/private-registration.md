@@ -1,6 +1,6 @@
 # Private publisher sign-in
 
-Status: local implementation passes 107 focused tests in the existing Node 22 dependency image; independent review and visual/full-build acceptance remain open. Not deployed.
+Status: source 3b3a7de passed the full image build, 107 focused registration tests and all existing runtime/privacy checks. Independent review found no serious issues. Eighteen isolated real-React browser cases pass across three widths. Full Next layout and live staff-login acceptance remain open. Not deployed.
 
 The publisher serves the existing team behind Social Studio. Turning off registration must prevent every new public account, including an empty installation or a generic identity provider. Existing linked staff accounts keep their current sign-in method. This does not introduce a staff-domain allowlist or link accounts by matching email.
 

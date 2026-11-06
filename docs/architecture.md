@@ -28,4 +28,6 @@ Public registration stays disabled. The local [private-registration correction](
 
 ## Next release
 
-The Facebook summary-counter image passed its source build and offline checks but is not deployed. Private-registration changes are under local development on a separate branch. Limited host capacity currently holds new publisher pulls and Studio builds. Docker size fields do not guarantee reclaimable space; only an approved exact cleanup followed by a measured readback can establish recovered headroom. No database, media, backup or shared-volume deletion is part of these patches.
+The combined Facebook summary-counter/private-registration source 3b3a7de passed its image build and offline checks but is not deployed. Isolated component-browser acceptance passes; full Next layout and live staff-login acceptance remain open. Limited host capacity currently holds new publisher pulls and Studio builds. Docker size fields do not guarantee reclaimable space; only an approved exact cleanup followed by a measured readback can establish recovered headroom. No database, media, backup or shared-volume deletion is part of these patches.
+
+A separate [dependency-download cache patch](../plans/publisher-build-cache.md) is under local preparation. It exports only the reviewed public dependency stage, keeps normal installation hooks after copying source, and preserves check-before-publication. Cold/warm performance is unmeasured.
