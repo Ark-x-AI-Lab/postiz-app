@@ -180,15 +180,12 @@
         "POSTGRES_USER": "${TEMPORAL_POSTGRES_USER:?Set TEMPORAL_POSTGRES_USER in the runtime environment}",
         "POSTGRES_PWD": "${TEMPORAL_POSTGRES_PASSWORD:?Set TEMPORAL_POSTGRES_PASSWORD in the runtime environment}",
         "POSTGRES_SEEDS": "temporal-postgresql",
-        "DYNAMIC_CONFIG_FILE_PATH": "config/dynamicconfig/development-sql.yaml",
+        "DYNAMIC_CONFIG_FILE_PATH": "config/dynamicconfig/docker.yaml",
         "ENABLE_ES": "true",
         "ES_SEEDS": "temporal-elasticsearch",
         "ES_VERSION": "v7",
         "TEMPORAL_NAMESPACE": "default"
-      },
-      "volumes": [
-        "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
-      ]
+      }
     },
     "temporal-admin-tools": {
       "image": "temporalio/admin-tools:1.28.1-tctl-1.18.4-cli-1.4.1",

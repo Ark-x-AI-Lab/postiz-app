@@ -31,6 +31,76 @@ jobs:
           bash -n deploy/arkx/pull-image.sh
           bash -n deploy/arkx/start-stack.sh
           node --check deploy/arkx/prepare-compose.cjs
+          node --check deploy/arkx/ecosystem.config.cjs
+      - name: Check Temporal defaults and Coolify network separation
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const { prepare } = require('./deploy/arkx/prepare-compose.cjs');
+          const source = JSON.parse(fs.readFileSync('deploy/arkx/compose.production.yaml', 'utf8'));
+          const routing = '1alwcyoouzoa5mf1jrnfzm87';
+          const run = data => prepare(JSON.stringify(data), JSON.parse);
+          const injected = () => {
+            const data = structuredClone(source);
+            data.networks[routing] = { name: routing, external: true };
+            for (const service of Object.values(data.services)) {
+              service.env_file = ['.env'];
+              service.networks = Object.fromEntries([...service.networks, routing].map(name => [name, null]));
+              service.labels = { 'synthetic.routing': 'retained' };
+            }
+            return data;
+          };
+          assert.deepEqual(run(source), source);
+          for (const asArray of [false, true]) {
+            const data = injected();
+            if (asArray) for (const service of Object.values(data.services)) service.networks = Object.keys(service.networks);
+            const expected = structuredClone(data);
+            for (const [name, service] of Object.entries(expected.services)) {
+              delete service.env_file;
+              if (name !== 'postiz') {
+                if (asArray) service.networks = service.networks.filter(name => name !== routing);
+                else delete service.networks[routing];
+              }
+            }
+            assert.deepEqual(run(data), expected);
+          }
+          // Check the actual Compose-normalized shape, including zero Temporal mounts.
+          const { execFileSync } = require('node:child_process');
+          const normalized = JSON.parse(execFileSync('docker', ['compose', '--project-directory', '.',
+            '--env-file', 'deploy/arkx/.env.example', '-f', 'deploy/arkx/compose.production.yaml',
+            '--profile', 'production', 'config', '--format', 'json'], { encoding: 'utf8' }));
+          assert.deepEqual(run(normalized), normalized);
+          assert.equal(normalized.services.temporal.environment.DYNAMIC_CONFIG_FILE_PATH, 'config/dynamicconfig/docker.yaml');
+          assert.equal((normalized.services.temporal.volumes || []).length, 0);
+          const blocked = [
+            data => { data.services.temporal.environment.DYNAMIC_CONFIG_FILE_PATH = 'config/dynamicconfig/development-sql.yaml'; },
+            data => { data.services.temporal.volumes = ['./missing:/etc/temporal/config/dynamicconfig:ro']; },
+            data => { data.services.temporal.volumes = [{ type: 'bind', source: '/missing', target: '/etc/temporal/config/dynamicconfig' }]; },
+            data => { data.services.temporal.volumes = ['defaults:/etc/temporal/config']; },
+            data => { data.services.temporal.image = 'temporalio/auto-setup:latest'; },
+            data => { data.services.temporal.networks['app-egress'] = null; },
+            data => { delete data.services.temporal.networks['temporal-network']; },
+            data => { data.services.temporal.networks.unknown = null; },
+            data => { data.services.temporal.network_mode = 'host'; },
+            data => { data.networks[routing].external = false; },
+            data => { data.networks[routing].name = 'unrelated'; },
+            data => { data.networks[routing].internal = false; },
+            data => { data.networks.unknown = { external: true, name: 'unknown' }; delete data.networks[routing]; },
+            data => { data.networks['2alwcyoouzoa5mf1jrnfzm87'] = { external: true, name: '2alwcyoouzoa5mf1jrnfzm87' }; },
+            data => { data.networks['temporal-network'].internal = false; },
+            data => { delete data.services.postiz.networks[routing]; },
+            data => { data.services.temporal.env_file = ['unexpected.env']; },
+            data => { data.services.temporal.environment.JWT_SECRET = 'synthetic'; },
+            data => { data.services.postiz.profiles = []; },
+          ];
+          for (const mutate of blocked) {
+            const data = injected();
+            mutate(data);
+            assert.throws(() => run(data));
+          }
+          console.log(`PASS: 4 allowed compose shapes; ${blocked.length} blocked configuration/network/guard regressions`);
+          NODE
       - name: Check the deployed helper timeout utility
         run: |
           docker run --rm --network none --read-only --entrypoint sh \
@@ -76,6 +146,37 @@ jobs:
           docker run --rm --network none --read-only --user 65534:65534 \
             --tmpfs /tmp:rw,noexec,nosuid,size=64m \
             --entrypoint node "$IMAGE" /app/node_modules/prisma/build/index.js --version
+      - name: Check production process entrypoints in the runtime image
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          docker run --rm --network none --read-only --user 65534:65534 \
+            --entrypoint sh "$IMAGE" -n /app/deploy/arkx/runtime-start.sh
+          docker run --rm --network none --read-only --user 65534:65534 \
+            --entrypoint node "$IMAGE" --check /app/deploy/arkx/ecosystem.config.cjs
+          docker run --rm -i --network none --read-only --user 65534:65534 \
+            --cap-drop=ALL --security-opt no-new-privileges --entrypoint node "$IMAGE" - <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { execFileSync } = require('node:child_process');
+          const { apps } = require('/app/deploy/arkx/ecosystem.config.cjs');
+          assert.deepEqual(apps.map(app => app.name).sort(), ['backend', 'frontend', 'orchestrator']);
+          fs.accessSync('/usr/local/bin/pm2-runtime', fs.constants.X_OK);
+          for (const app of apps) {
+            assert.equal(app.interpreter, 'node');
+            assert.equal(app.exec_mode, 'fork');
+            assert.equal(app.instances, 1);
+            assert.deepEqual(app.env, { NODE_ENV: 'production' });
+            assert(fs.statSync(app.cwd).isDirectory());
+            const script = path.resolve(app.cwd, app.script);
+            assert(fs.statSync(script).isFile());
+            execFileSync(process.execPath, ['--check', script], { stdio: 'pipe' });
+            assert.equal(fs.existsSync(path.join(app.cwd, '.env')), false);
+          }
+          assert.equal(fs.existsSync('/app/.env'), false);
+          console.log('PASS: three direct Node entrypoints and PM2 runtime exist; scripts parse offline; no runtime .env files');
+          NODE
       - name: Prove service environment separation in the built image
         env:
           IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}

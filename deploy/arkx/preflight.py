@@ -63,8 +63,13 @@ def static_checks():
                 need(service["image"] == IMAGES[name], f"Upstream image drift: {name}")
             for mount in service.get("volumes", []):
                 source = mount.split(":")[0]
-                need(source in data["volumes"] or mount == "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro",
+                need(source in data["volumes"] or (mode == "rehearsal" and name == "temporal"
+                     and mount == "./deploy/arkx/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"),
                      f"Unexpected mount: {mode}/{name}")
+        if mode == "production":
+            temporal = services["temporal"]
+            need(temporal["environment"]["DYNAMIC_CONFIG_FILE_PATH"] == "config/dynamicconfig/docker.yaml"
+                 and not temporal.get("volumes"), "Production Temporal must use unmounted image defaults")
         for key, volume in data["volumes"].items():
             expected = "arkx-postiz-${ARKX_CANDIDATE_ID:?Set ARKX_CANDIDATE_ID in the runtime environment}-" + mode + "-" + key
             need(volume == {"name": expected}, f"Unsafe volume definition: {mode}/{key}")
@@ -95,9 +100,11 @@ def guard_checks():
     with tempfile.TemporaryDirectory(prefix="arkx-postiz-guard-") as tmp:
         folder = Path(tmp)
         marker = folder / "calls"
-        for name in ("nginx", "pnpm"):
+        for name in ("nginx", "pnpm", "pm2-runtime"):
             stub = folder / name
-            stub.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$ARKX_TEST_MARKER"\n')
+            stub.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$ARKX_TEST_MARKER"\n'
+                            + f'if [ "${{ARKX_TEST_FAIL-}}" = "{name}" ]; then exit 73; fi\n'
+                            + ('test "$$" = "$ARKX_TEST_WRAPPER_PID"\n' if name == "pm2-runtime" else ''))
             stub.chmod(0o700)
         base = {"PATH": f"{folder}:/usr/bin:/bin", "ARKX_TEST_MARKER": str(marker)}
         for mode in (None, "rehearsal", "Production", ""):
@@ -106,10 +113,47 @@ def guard_checks():
                 env["ARKX_RUNTIME"] = mode
             result = subprocess.run(["sh", str(HERE / "runtime-start.sh")], env=env, capture_output=True)
             need(result.returncode == 64 and not marker.exists(), "Blocked runtime invoked a publisher command")
-        result = subprocess.run(["sh", str(HERE / "runtime-start.sh")], env={**base, "ARKX_RUNTIME": "production"}, capture_output=True)
-        need(result.returncode == 0 and marker.read_text().splitlines() == ["nginx ", "pnpm run pm2"],
-             "Allowed runtime did not preserve upstream startup command")
-    print("PASS: startup guard blocks 4 invalid/missing selections; production reaches stubbed nginx and pnpm only")
+        invocation = ["sh", "-c", 'export ARKX_TEST_WRAPPER_PID=$$; exec sh "$1"',
+                      "guard-check", str(HERE / "runtime-start.sh")]
+        calls = ["nginx ", "pnpm run prisma-db-push",
+                 "pm2-runtime start /app/deploy/arkx/ecosystem.config.cjs"]
+        for fail, expected in (("nginx", calls[:1]), ("pnpm", calls[:2]), ("", calls)):
+            if marker.exists():
+                marker.unlink()
+            result = subprocess.run(invocation, env={**base, "ARKX_RUNTIME": "production", "ARKX_TEST_FAIL": fail},
+                                    capture_output=True)
+            need(result.returncode == (73 if fail else 0) and marker.read_text().splitlines() == expected,
+                 "Startup order, failure propagation or PM2 exec ownership changed")
+    print("PASS: startup guard blocks 4 invalid/missing selections; nginx/schema failures stop startup; allowed runtime execs PM2 after guarded schema preparation")
+
+
+def ecosystem_checks():
+    result = subprocess.run(["node", "-e", "console.log(JSON.stringify(require(process.argv[1])))",
+                             str(HERE / "ecosystem.config.cjs")], capture_output=True, text=True)
+    need(result.returncode == 0, "Cannot load production PM2 configuration")
+    apps = json.loads(result.stdout)["apps"]
+    need(len(apps) == 3 and {app["name"] for app in apps} == {"backend", "orchestrator", "frontend"},
+         "Production PM2 must supervise exactly three services")
+    for app in apps:
+        name = app["name"]
+        need(app["cwd"] == f"/app/apps/{name}" and app["interpreter"] == "node"
+             and app["exec_mode"] == "fork" and app["instances"] == 1
+             and app["env"] == {"NODE_ENV": "production"}, "PM2 process ownership or production environment changed")
+        package = json.loads((ROOT / f"apps/{name}/package.json").read_text())
+        if name == "frontend":
+            need(app["script"] == "/app/node_modules/next/dist/bin/next"
+                 and app["args"] == ["start", "-p", "4200"]
+                 and package["scripts"]["start"] == "dotenv -e ../../.env -- next start -p 4200",
+                 "Frontend production command differs from upstream")
+        else:
+            script = f"./dist/apps/{name}/src/main.js"
+            need(app["script"] == script and app["node_args"] == ["--experimental-require-module"]
+                 and package["scripts"]["start"] == f"dotenv -e ../../.env -- node --experimental-require-module {script}",
+                 "Service production command differs from upstream")
+    package = json.loads((ROOT / "package.json").read_text())
+    need(package["scripts"]["prisma-db-push"] == "pnpm exec prisma db push --schema ./libraries/nestjs-libraries/src/database/prisma/schema.prisma",
+         "Installed Prisma schema guard changed")
+    print("PASS: PM2 directly supervises all 3 Node services; commands match installed schema and upstream service paths without dotenv wrappers")
 
 
 def compose(mode, env, *options):
@@ -150,10 +194,15 @@ def compose_path_checks(env):
             for name, service in services.items():
                 need(service.get("environment", {}).get("ARKX_PATH_PROBE") == "synthetic-validation-only",
                      f"Root {mode}/{name} generated env_file was not loaded")
-            mount = next(v for v in services["temporal"]["volumes"]
-                         if v["target"] == "/etc/temporal/config/dynamicconfig")
-            need(mount["type"] == "bind" and mount["source"] == str(dynamic)
-                 and mount["read_only"] is True, f"Root {mode} dynamic configuration bind is wrong")
+            if mode == "rehearsal":
+                mount = next(v for v in services["temporal"]["volumes"]
+                             if v["target"] == "/etc/temporal/config/dynamicconfig")
+                need(mount["type"] == "bind" and mount["source"] == str(dynamic)
+                     and mount["read_only"] is True, "Root rehearsal dynamic configuration bind is wrong")
+            else:
+                need(not services["temporal"].get("volumes")
+                     and services["temporal"]["environment"]["DYNAMIC_CONFIG_FILE_PATH"] == "config/dynamicconfig/docker.yaml",
+                     "Root production Temporal must not depend on a host configuration path")
             if mode == "production":
                 app = services["postiz"]
                 need("build" not in app and app["image"] == pinned_app_image(env["SOURCE_COMMIT"]),
@@ -162,7 +211,7 @@ def compose_path_checks(env):
             need(result.returncode != 0 and str(nested / ".env") in result.stderr
                  and "no such file" in result.stderr.lower(),
                  f"Nested {mode} must reject missing generated env_file")
-    print("PASS: both Coolify-generated env_file fixtures load all 15 service markers from repository root; pinned image and bind paths match; nested project directory fails on missing .env")
+    print("PASS: both Coolify-generated env_file fixtures load all 15 service markers from repository root; production uses unmounted Temporal image defaults; rehearsal bind matches; nested project directory fails on missing .env")
 
 
 def compose_checks():
@@ -249,10 +298,11 @@ def main():
     need(not args.check_new_volumes or args.mode, "--check-new-volumes requires --mode")
     static_checks()
     guard_checks()
+    ecosystem_checks()
     compose_checks()
     if args.mode:
         environment_checks(args.mode, args.check_new_volumes)
-    for name in ("compose.rehearsal.yaml", "compose.production.yaml", "runtime-start.sh", "dynamicconfig/development-sql.yaml"):
+    for name in ("compose.rehearsal.yaml", "compose.production.yaml", "runtime-start.sh", "ecosystem.config.cjs", "dynamicconfig/development-sql.yaml"):
         print(f"SHA256 {name}: {hashlib.sha256((HERE / name).read_bytes()).hexdigest()}")
 
 

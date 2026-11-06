@@ -5,5 +5,7 @@ if [ "${ARKX_RUNTIME-}" != production ]; then
   echo 'Refusing Postiz startup: ARKX_RUNTIME must equal production.' >&2
   exit 64
 fi
-# Preserve Dockerfile.dev's command only after the guard passes.
-exec sh -c 'nginx && pnpm run pm2'
+# Complete schema preparation before supervising the application processes directly.
+nginx
+pnpm run prisma-db-push
+exec pm2-runtime start /app/deploy/arkx/ecosystem.config.cjs
