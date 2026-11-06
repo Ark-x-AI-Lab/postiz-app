@@ -85,6 +85,14 @@ jobs:
             --cap-drop=ALL --security-opt no-new-privileges --entrypoint node "$IMAGE" \
             /app/deploy/arkx/prepare-compose.cjs < "$RUNNER_TEMP/injected-compose.json" > "$RUNNER_TEMP/prepared-compose.json"
           python3 -c "import json; assert json.load(open('$RUNNER_TEMP/prepared-compose.json')) == json.load(open('deploy/arkx/compose.production.yaml'))"
+      - name: Check LinkedIn diagnostic safety with pinned runtime dependencies
+        env:
+          IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}
+        run: |
+          docker run --rm --network none --read-only --user 65534:65534 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint node "$IMAGE" --test \
+            /app/libraries/nestjs-libraries/src/integrations/linkedin.oauth.diagnostics.test.cjs
       - name: Check runtime tools and final image payload
         env:
           IMAGE: ghcr.io/ark-x-ai-lab/postiz-app:sha-${{ github.sha }}

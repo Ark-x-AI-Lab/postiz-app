@@ -1,4 +1,5 @@
 import { Integration } from '@prisma/client';
+import type { LinkedInOAuthDiagnostics } from '../linkedin.oauth.diagnostics';
 
 export interface ClientInformation {
   client_id: string;
@@ -6,6 +7,7 @@ export interface ClientInformation {
   instanceUrl: string;
 }
 export interface IAuthenticator {
+  oauthDiagnostics?: LinkedInOAuthDiagnostics;
   authenticate(
     params: {
       code: string;

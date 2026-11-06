@@ -247,42 +247,49 @@ export class IntegrationsController {
       throw new Error('Missing external url');
     }
 
-    try {
-      const getExternalUrl = integrationProvider.externalUrl
-        ? {
-            ...(await integrationProvider.externalUrl(externalUrl)),
-            instanceUrl: externalUrl,
-          }
-        : undefined;
+    const connect = async () => {
+      try {
+        const getExternalUrl = integrationProvider.externalUrl
+          ? {
+              ...(await integrationProvider.externalUrl(externalUrl)),
+              instanceUrl: externalUrl,
+            }
+          : undefined;
 
-      const { codeVerifier, state, url } =
-        await integrationProvider.generateAuthUrl(getExternalUrl);
+        const { codeVerifier, state, url } =
+          await integrationProvider.generateAuthUrl(getExternalUrl);
 
-      if (refresh) {
-        await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
+        if (refresh) {
+          await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
+        }
+
+        if (onboarding === 'true') {
+          await ioRedis.set(`onboarding:${state}`, 'true', 'EX', 3600);
+        }
+
+        if (redirectUrl) {
+          await ioRedis.set(`redirect:${state}`, redirectUrl, 'EX', 3600);
+        }
+
+        await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);
+        await ioRedis.set(`login:${state}`, codeVerifier, 'EX', 3600);
+        await ioRedis.set(
+          `external:${state}`,
+          JSON.stringify(getExternalUrl),
+          'EX',
+          3600
+        );
+
+        await integrationProvider.oauthDiagnostics?.remember(ioRedis, state);
+        return { url };
+      } catch (err) {
+        integrationProvider.oauthDiagnostics?.failure('connect');
+        return { err: true };
       }
-
-      if (onboarding === 'true') {
-        await ioRedis.set(`onboarding:${state}`, 'true', 'EX', 3600);
-      }
-
-      if (redirectUrl) {
-        await ioRedis.set(`redirect:${state}`, redirectUrl, 'EX', 3600);
-      }
-
-      await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);
-      await ioRedis.set(`login:${state}`, codeVerifier, 'EX', 3600);
-      await ioRedis.set(
-        `external:${state}`,
-        JSON.stringify(getExternalUrl),
-        'EX',
-        3600
-      );
-
-      return { url };
-    } catch (err) {
-      return { err: true };
-    }
+    };
+    return integrationProvider.oauthDiagnostics
+      ? integrationProvider.oauthDiagnostics.run('connect', connect)
+      : connect();
   }
 
   @Post('/:id/time')
@@ -378,50 +385,56 @@ export class IntegrationsController {
         body.name
       )
     ) {
-      try {
-        // @ts-ignore
-        const load = await integrationProvider[body.name](
-          getIntegration.token,
-          body.data,
-          getIntegration.internalId,
-          getIntegration
-        );
-
-        return load;
-      } catch (err) {
-        // The platform will keep rejecting this channel until the user
-        // re-connects it: mark it as needing a refresh instead of retrying.
-        if (err instanceof Disconnect) {
-          await this._integrationService.disconnectChannel(
-            org.id,
-            getIntegration
-          );
-          return false;
-        }
-
-        if (err instanceof RefreshToken) {
-          const data = await this._refreshIntegrationService.refresh(
+      const call = async () => {
+        try {
+          // @ts-ignore
+          const load = await integrationProvider[body.name](
+            getIntegration.token,
+            body.data,
+            getIntegration.internalId,
             getIntegration
           );
 
-          if (!data) {
-            return;
+          return load;
+        } catch (err) {
+          // The platform will keep rejecting this channel until the user
+          // re-connects it: mark it as needing a refresh instead of retrying.
+          if (err instanceof Disconnect) {
+            await this._integrationService.disconnectChannel(
+              org.id,
+              getIntegration
+            );
+            return false;
           }
 
-          const { accessToken } = data;
+          if (err instanceof RefreshToken) {
+            const data = await this._refreshIntegrationService.refresh(
+              getIntegration
+            );
 
-          if (accessToken) {
-            if (integrationProvider.refreshWait) {
-              await timer(10000);
+            if (!data) {
+              return;
             }
-            return this.functionIntegration(org, body);
+
+            const { accessToken } = data;
+
+            if (accessToken) {
+              if (integrationProvider.refreshWait) {
+                await timer(10000);
+              }
+              return this.functionIntegration(org, body);
+            }
+
+            return false;
           }
 
           return false;
         }
-
-        return false;
-      }
+      };
+      const diagnosticStage = integrationProvider.oauthDiagnostics?.dashboardStage(body.name);
+      return diagnosticStage
+        ? integrationProvider.oauthDiagnostics.resume(ioRedis, body.id, diagnosticStage, call)
+        : call();
     }
     throw new Error('Function not found');
   }

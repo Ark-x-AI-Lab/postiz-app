@@ -1,3 +1,4 @@
+import { LinkedInOAuthDiagnostics } from '../linkedin.oauth.diagnostics';
 import {
   AuthTokenDetails,
   PendingCheckResponse,
@@ -59,6 +60,7 @@ type LinkedinPendingData = {
 )
 export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   identifier = 'linkedin';
+  oauthDiagnostics = new LinkedInOAuthDiagnostics('linkedin');
   name = 'LinkedIn';
   oneTimeToken = true;
 
@@ -216,37 +218,39 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       expires_in: expiresIn,
       refresh_token: refreshToken,
       scope,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    } = await this.oauthDiagnostics.requestJson('token_exchange', () =>
+      fetch('https://www.linkedin.com/oauth/v2/accessToken', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body,
       })
-    ).json();
+    );
 
-    this.checkScopes(this.scopes, scope);
+    await this.oauthDiagnostics.step('scope_check', async () =>
+      this.checkScopes(this.scopes, scope)
+    );
 
     const {
       name,
       sub: id,
       picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
+    } = await this.oauthDiagnostics.requestJson('userinfo', () =>
+      fetch('https://api.linkedin.com/v2/userinfo', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       })
-    ).json();
+    );
 
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
+    const { vanityName } = await this.oauthDiagnostics.requestJson('member_profile', () =>
+      fetch('https://api.linkedin.com/v2/me', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       })
-    ).json();
+    );
 
     return {
       id,

@@ -1,5 +1,6 @@
 'use client';
 
+import { reportOAuthDiagnostic } from '@gitroom/helpers/utils/oauth.diagnostics';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import React, { FC, useCallback, useMemo } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -488,7 +489,8 @@ export const AddProviderComponent: FC<{
           if (response.status === 402) {
             return;
           }
-          const { url, err } = await response.json();
+          const { url, err, diagnostics } = await response.json();
+          reportOAuthDiagnostic(diagnostics);
           if (err) {
             toaster.show(
               t(

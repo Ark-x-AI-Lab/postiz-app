@@ -1,5 +1,6 @@
 'use client';
 
+import { reportOAuthDiagnostic } from '@gitroom/helpers/utils/oauth.diagnostics';
 import {
   AddProviderButton,
   CustomVariables,
@@ -576,7 +577,7 @@ export const LaunchesComponent = () => {
           return;
         }
 
-        const { url } = await (
+        const { url, diagnostics } = await (
           await fetch(
             `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`,
             {
@@ -584,6 +585,7 @@ export const LaunchesComponent = () => {
             }
           )
         ).json();
+        reportOAuthDiagnostic(diagnostics);
         window.location.href = url;
       },
     []

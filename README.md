@@ -4,7 +4,7 @@
 
 | Item | Current state |
 | --- | --- |
-| Status | Fork builds pass; stopped Coolify candidate connected; live migration pending |
+| Status | Fork builds pass; private candidate connected; backend/recovery checks pass; live migration pending |
 | Live service | https://postiz.arkx.group |
 | Owner | Ark-x AI Lab |
 | Fork started | 6 November 2026 |
@@ -14,7 +14,7 @@ The team creates content in Studio; Postiz connects channels, schedules approved
 
 [Product and progress](docs/PRODUCT.md) · [Architecture](docs/architecture.md) · [Migration plan](plans/coolify-migration.md)
 
-For local development, follow the upstream instructions below and use PNPM. Never copy production credentials into the checkout. Runtime secrets belong in Coolify. Clone changes onto a working branch, review them, then merge into `deploy/arkx`; the intended deployment uses the Ark-x-AI-Lab Coolify GitHub App. The replacement is connected but stopped, with no public domain and automatic deployment disabled until migration checks pass.
+For local development, follow the upstream instructions below and use PNPM. Never copy production credentials into the checkout. Runtime secrets belong in Coolify. Clone changes onto a working branch, review them, then merge into `deploy/arkx`; the intended deployment uses the Ark-x-AI-Lab Coolify GitHub App. The replacement has no public domain and automatic deployment remains disabled until migration checks pass. Private backend/recovery checks are complete; production scheduling and cutover remain open. See [safe LinkedIn diagnostics](docs/linkedin-diagnostics.md).
 
 Upstream notices and instructions follow, unchanged.
 

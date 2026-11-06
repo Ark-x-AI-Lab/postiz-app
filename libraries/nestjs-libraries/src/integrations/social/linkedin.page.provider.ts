@@ -1,3 +1,4 @@
+import { LinkedInOAuthDiagnostics } from '../linkedin.oauth.diagnostics';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -22,6 +23,7 @@ export class LinkedinPageProvider
   implements SocialProvider
 {
   override identifier = 'linkedin-page';
+  override oauthDiagnostics = new LinkedInOAuthDiagnostics('linkedin-page');
   override name = 'LinkedIn Page';
   override isBetweenSteps = true;
   override refreshWait = true;
@@ -138,8 +140,8 @@ export class LinkedinPageProvider
 
   @DashboardFunction()
   async companies(accessToken: string) {
-    const { elements, ...all } = await (
-      await fetch(
+    const { elements, ...all } = await this.oauthDiagnostics.requestJson('page_list', () =>
+      fetch(
         'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee&state=APPROVED&projection=(elements*(role,organizationalTarget~(localizedName,vanityName,logoV2(original~:playableStreams))))',
         {
           headers: {
@@ -149,9 +151,9 @@ export class LinkedinPageProvider
           },
         }
       )
-    ).json();
+    );
 
-    return (elements || [])
+    const companies = (elements || [])
       .filter(
         (e: any) =>
           e['organizationalTarget~'] &&
@@ -166,6 +168,8 @@ export class LinkedinPageProvider
           e['organizationalTarget~'].logoV2?.['original~']?.elements?.[0]
             ?.identifiers?.[0]?.identifier,
       }));
+    if (!companies.length) this.oauthDiagnostics.failure('page_list', 'empty_result');
+    return companies;
   }
 
   async reConnect(
@@ -188,8 +192,8 @@ export class LinkedinPageProvider
 
   async fetchPageInformation(accessToken: string, params: { page: string }) {
     const pageId = params.page;
-    const data = await (
-      await fetch(
+    const data = await this.oauthDiagnostics.requestJson('page_details', () =>
+      fetch(
         `https://api.linkedin.com/v2/organizations/${pageId}?projection=(id,localizedName,vanityName,logoV2(original~:playableStreams))`,
         {
           headers: {
@@ -197,7 +201,7 @@ export class LinkedinPageProvider
           },
         }
       )
-    ).json();
+    );
 
     return {
       id: data.id,
@@ -229,37 +233,39 @@ export class LinkedinPageProvider
       expires_in: expiresIn,
       refresh_token: refreshToken,
       scope,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    } = await this.oauthDiagnostics.requestJson('token_exchange', () =>
+      fetch('https://www.linkedin.com/oauth/v2/accessToken', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body,
       })
-    ).json();
+    );
 
-    this.checkScopes(this.scopes, scope);
+    await this.oauthDiagnostics.step('scope_check', async () =>
+      this.checkScopes(this.scopes, scope)
+    );
 
     const {
       name,
       sub: id,
       picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
+    } = await this.oauthDiagnostics.requestJson('userinfo', () =>
+      fetch('https://api.linkedin.com/v2/userinfo', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       })
-    ).json();
+    );
 
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
+    const { vanityName } = await this.oauthDiagnostics.requestJson('member_profile', () =>
+      fetch('https://api.linkedin.com/v2/me', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       })
-    ).json();
+    );
 
     return {
       // namespaced placeholder so the in-between row never collides with the

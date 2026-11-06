@@ -15,7 +15,7 @@ import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permis
 import { ApiTags } from '@nestjs/swagger';
 import { NotEnoughScopesFilter } from '@gitroom/nestjs-libraries/integrations/integration.missing.scopes';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
-import { AuthTokenDetails } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { AuthTokenDetails, SocialProvider } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { NotEnoughScopes } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import {
   AuthorizationActions,
@@ -58,6 +58,17 @@ export class NoAuthIntegrationsController {
     const integrationProvider =
       this._integrationManager.getSocialIntegration(integration);
 
+    const connect = () => this.completeSocialMedia(integration, body, integrationProvider);
+    return integrationProvider.oauthDiagnostics
+      ? integrationProvider.oauthDiagnostics.resume(ioRedis, body.state, 'callback', connect)
+      : connect();
+  }
+
+  private async completeSocialMedia(
+    integration: string,
+    body: ConnectIntegrationDto,
+    integrationProvider: SocialProvider
+  ) {
     const getCodeVerifier = integrationProvider.customFields
       ? 'none'
       : await ioRedis.get(`login:${body.state}`);
@@ -150,7 +161,7 @@ export class NoAuthIntegrationsController {
             });
           } catch (err: any) {
             return res({
-              error: err.message,
+              error: integrationProvider.oauthDiagnostics ? 'LinkedIn authentication failed' : err.message,
               accessToken: '',
               id: '',
               name: '',
@@ -165,7 +176,7 @@ export class NoAuthIntegrationsController {
       } catch (err) {
         if (err instanceof NotEnoughScopes) {
           return res({
-            error: err.message,
+            error: integrationProvider.oauthDiagnostics ? 'LinkedIn authentication failed' : err.message,
             accessToken: '',
             id: '',
             name: '',
@@ -175,7 +186,10 @@ export class NoAuthIntegrationsController {
           });
         }
 
-        console.log(`Authentication failed for ${integration}:`, err);
+        integrationProvider.oauthDiagnostics?.failure('callback');
+        if (!integrationProvider.oauthDiagnostics) {
+          console.log(`Authentication failed for ${integration}:`, err);
+        }
         return res({
           error: 'Authentication failed',
           accessToken: '',
@@ -270,10 +284,15 @@ export class NoAuthIntegrationsController {
           : undefined
       );
 
+    await integrationProvider.oauthDiagnostics?.remember(ioRedis, createUpdate.id);
+    if (integrationProvider.isBetweenSteps && !refresh) {
+      await integrationProvider.oauthDiagnostics?.rememberPageAttempt(ioRedis, createUpdate.id);
+    }
+
     this._refreshIntegrationService
       .startRefreshWorkflow(org.id, createUpdate.id, integrationProvider)
       .catch((err) => {
-        console.log(err);
+        if (!integrationProvider.oauthDiagnostics) console.log(err);
       });
 
     // Fetch pages if this is a two-step provider and not a refresh
@@ -293,7 +312,8 @@ export class NoAuthIntegrationsController {
           pages = await integrationProvider[fetchMethod](accessToken);
         }
       } catch (err) {
-        console.log('Failed to fetch pages:', err);
+        integrationProvider.oauthDiagnostics?.failure('page_list');
+        if (!integrationProvider.oauthDiagnostics) console.log('Failed to fetch pages:', err);
       }
     }
 

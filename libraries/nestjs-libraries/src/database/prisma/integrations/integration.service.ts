@@ -436,26 +436,31 @@ export class IntegrationService {
       );
     }
 
-    const getIntegrationInformation = await provider.fetchPageInformation(
-      getIntegration.token,
-      data
-    );
+    const save = async () => {
+      const getIntegrationInformation = await provider.fetchPageInformation(
+        getIntegration.token,
+        data
+      );
 
-    await this.checkForDeletedOnceAndUpdate(
-      org,
-      String(getIntegrationInformation.id)
-    );
-    await this._integrationRepository.updateIntegration(id, {
-      picture: getIntegrationInformation.picture,
-      internalId: String(getIntegrationInformation.id),
-      organizationId: org,
-      name: getIntegrationInformation.name,
-      inBetweenSteps: false,
-      token: getIntegrationInformation.access_token,
-      profile: getIntegrationInformation.username,
-    });
+      await this.checkForDeletedOnceAndUpdate(
+        org,
+        String(getIntegrationInformation.id)
+      );
+      await this._integrationRepository.updateIntegration(id, {
+        picture: getIntegrationInformation.picture,
+        internalId: String(getIntegrationInformation.id),
+        organizationId: org,
+        name: getIntegrationInformation.name,
+        inBetweenSteps: false,
+        token: getIntegrationInformation.access_token,
+        profile: getIntegrationInformation.username,
+      });
 
-    return { success: true };
+      return { success: true };
+    };
+    return provider.oauthDiagnostics
+      ? provider.oauthDiagnostics.resumePageSave(ioRedis, id, data?.oauthDiagnosticId, save)
+      : save();
   }
 
   async checkAnalytics(

@@ -7,3 +7,6 @@
 - GNU `timeout` needs a bounded `--kill-after` to terminate a TERM-ignoring Docker client. Track and verify only the temporary helper’s exact container ID during cleanup.
 - Compose profiles can be enabled by inherited `COMPOSE_PROFILES`, including a selected dotenv file. Infrastructure-only startup explicitly clears that environment value; publisher selection requires both an explicit activation flag and production runtime intent.
 - Coolify helper 1.0.19 uses BusyBox timeout, not GNU coreutils. Both support `timeout -k SECONDS`; BusyBox rejects GNU’s long `--kill-after` option. Test shell utilities in the actual helper image, not only on the host.
+
+- Correlating Page-save diagnostics by an intermediate integration ID mixes two tabs that upsert the same member. Preserve a per-attempt server-validated binding through the picker; keep it independent of dashboard lookup and authorization. Regression must use two callbacks sharing one integration.
+- Offline TypeScript transpilation on the laptop is not the pinned-runtime build. Run diagnostic safety tests inside the actual Node22/TypeScript5.5 image with source overlays or the built commit image, network disabled and a read-only filesystem.

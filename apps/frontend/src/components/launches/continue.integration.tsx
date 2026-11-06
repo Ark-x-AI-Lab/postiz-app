@@ -1,5 +1,6 @@
 'use client';
 
+import { reportOAuthDiagnostic, safeOAuthDiagnostic } from '@gitroom/helpers/utils/oauth.diagnostics';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { HttpStatusCode } from 'axios';
 import { useRouter } from 'next/navigation';
@@ -16,6 +17,7 @@ interface TwoStepState {
   onboarding: boolean;
   pages: any[];
   returnURL?: string;
+  oauthDiagnosticId?: string;
 }
 
 interface SuccessState {
@@ -114,7 +116,7 @@ export const ContinueIntegration: FC<{
 
       // If public endpoint fails with specific errors, try authenticated endpoint
       if (data.status === HttpStatusCode.BadRequest) {
-        const errorData = await data.json().catch(() => ({}));
+        const errorData = await data.clone().json().catch(() => ({}));
         // "Invalid connection type" means this wasn't started as a public flow
         if (
           errorData.message?.includes('Invalid connection type') ||
@@ -127,6 +129,9 @@ export const ContinueIntegration: FC<{
         }
       }
 
+      const diagnosticFailure = reportOAuthDiagnostic(
+        (await data.clone().json().catch(() => ({}))).diagnostics
+      );
       if (data.status === HttpStatusCode.PreconditionFailed) {
         const { returnURL } = await data.json().catch(() => ({}));
         navigateOrShow(
@@ -134,6 +139,12 @@ export const ContinueIntegration: FC<{
           returnURL,
           'Precondition failed'
         );
+        return;
+      }
+
+      if (diagnosticFailure) {
+        setErrorMessage(diagnosticFailure);
+        setError(true);
         return;
       }
 
@@ -162,6 +173,7 @@ export const ContinueIntegration: FC<{
         pages,
         returnURL,
         extensionToken,
+        diagnostics,
       } = await data.json();
       const onboarding = resOnboarding || searchParams.onboarding === 'true';
 
@@ -195,11 +207,13 @@ export const ContinueIntegration: FC<{
 
       // If it's a two-step provider, show the selection UI inline
       if (inBetweenSteps && !searchParams.refresh) {
+        const diagnostic = safeOAuthDiagnostic(diagnostics);
         setTwoStepState({
           integrationId: id,
           onboarding,
           pages: pages || [],
           returnURL,
+          oauthDiagnosticId: diagnostic?.provider === provider ? diagnostic.correlationId : undefined,
         });
         return;
       }
@@ -228,8 +242,18 @@ export const ContinueIntegration: FC<{
 
         const response = await fetch(endpoint, {
           method: 'POST',
-          body: JSON.stringify({ ...modifiedParams, ...data }),
+          body: JSON.stringify({ ...modifiedParams, ...data, oauthDiagnosticId: twoStepState.oauthDiagnosticId }),
         });
+
+        const diagnosticFailure = reportOAuthDiagnostic(
+          (await response.clone().json().catch(() => ({}))).diagnostics
+        );
+        if (diagnosticFailure) {
+          setErrorMessage(diagnosticFailure);
+          setError(true);
+          setTwoStepState(null);
+          return;
+        }
 
         if (
           response.status !== HttpStatusCode.Ok &&

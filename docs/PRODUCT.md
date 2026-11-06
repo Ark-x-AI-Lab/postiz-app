@@ -26,7 +26,7 @@ Local branch → reviewed commit → GitHub deploy/arkx → Coolify GitHub App �
 
 - [x] Fork exists in the correct organization and local clone has upstream remote.
 - [x] Deployment definitions, startup guards, schema validation and isolated GitHub source build pass.
-- [x] Coolify GitHub App connected to deploy/arkx; candidate stopped, no public domain, automatic deployment disabled until migration passes.
+- [x] Coolify GitHub App connected to deploy/arkx; candidate has no public domain and automatic deployment stays disabled until migration passes. Private infrastructure exists; no replacement publisher is active.
 - [ ] Isolated migration rehearsal succeeds with real sending disabled.
 - [ ] Backup restoration and old-version rollback are demonstrated.
 - [ ] Live cutover preserves authentication, workspace, integrations and files.
@@ -45,3 +45,15 @@ Build evidence: [source image and private-context checks](https://github.com/Ark
 The maintained fork builds its commit-tagged image in GitHub Actions and Coolify pulls that exact image. Production keys are runtime-only. The image must pass an offline, read-only Prisma tool check before publication. The existing publisher remains live while database upgrade, recovery and replacement readiness are tested.
 
 The private registry login is separate from the shared server login. Provider credentials belong to the publisher’s declared environment; infrastructure does not inherit the publisher’s global environment file. Default deployment startup continues to exclude the publisher until its explicit activation step.
+
+## Current rehearsal evidence
+
+The database-only upgrade preserved all45 original tables; repeated synchronization preserved88 resulting tables, and an independent restore reproduced the original45-table state. An isolated upgraded backend now passes the existing API-key and2-integration checks, rejects missing/invalid keys, and keeps registration closed. A token signed by the old publisher is accepted by the new backend; API keys remain unchanged. This is backend compatibility proof, not frontend, scheduler, live connector validity or cutover proof. The rehearsal has no public ports, no provider app credentials and an internal-only network.
+
+Capacity recovery removed the owner-selected obsolete artifacts and inactive build cache, preserving current and rollback images, data volumes and backups. Available disk capacity is checked before every new pull; Docker accounting sizes are not treated as guaranteed reclaim.
+
+## LinkedIn connection diagnostics
+
+The maintained connector includes temporary, opt-in stage diagnostics for connect, callback, token exchange, scope checks, profile reads, Page discovery and Page saving. A random reference links safe browser/API/backend events. Logged fields are closed and exclude raw credentials, authorization state/codes, user/Page identifiers and response bodies. The flag defaults off; enabled runtime collection and the deployed pinned build still need acceptance. The21-test diagnostics harness passed offline with the pinned Node22/TypeScript5.5 image, including overlapping Page selections and invalid bindings. This does not itself establish or repair the live LinkedIn failure.
+
+Recovery evidence: the old publisher image also booted against the independent restored old-schema database and a fresh Redis instance loaded from the verified RDB; its5 API checks pass. Configuration and uploads restored to fresh test volumes match every saved file name/content hash (0 config files,3 upload files; archive directories counted separately). A synthetic value encrypted by the actual old helper decrypts with the actual new helper under the preserved secret. No real integration token was read for that check. This is still not an independently verified full UI rollback or live cutover.
