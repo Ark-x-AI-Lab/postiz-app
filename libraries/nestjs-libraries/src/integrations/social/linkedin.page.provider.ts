@@ -1,12 +1,14 @@
 import { LinkedInOAuthDiagnostics } from '../linkedin.oauth.diagnostics';
 import {
   AnalyticsData,
+  PostAnalyticsContext,
   AuthTokenDetails,
   PostDetails,
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { analyticsBody, linkedinPostAnalytics } from '../post-analytics';
 import { LinkedinProvider } from '@gitroom/nestjs-libraries/integrations/social/linkedin.provider';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
@@ -454,125 +456,38 @@ export class LinkedinPageProvider
     integrationId: string,
     accessToken: string,
     postId: string,
-    date: number
+    date: number,
+    context?: PostAnalyticsContext
   ): Promise<AnalyticsData[]> {
-    // Fetch lifetime share statistics for the specific post.
-    // LinkedIn does not support time-bound statistics for specific share queries,
-    // so no timeIntervals is sent and elements come back without a timeRange.
-    const shareStatsUrl = `https://api.linkedin.com/v2/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(
-      `urn:li:organization:${integrationId}`
-    )}&shares=List(${encodeURIComponent(postId)})`;
-
-    const { elements: shareElements }: { elements: PostShareStatElement[] } =
-      await (
-        await fetch(shareStatsUrl, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202601',
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        })
-      ).json();
-
-    // Also fetch social actions (likes, comments, shares) for the specific post
-    let socialActions: SocialActionsResponse | null = null;
     try {
-      const socialActionsUrl = `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(
-        postId
-      )}`;
-      socialActions = await (
-        await fetch(socialActionsUrl, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202601',
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        })
-      ).json();
-    } catch (e) {
-      // Social actions may not be available for all posts
-    }
-
-    // Process share statistics into time series data
-    const analytics = (shareElements || []).reduce(
-      (all, current) => {
-        if (typeof current?.totalShareStatistics !== 'undefined') {
-          const dateStr = dayjs(current.timeRange?.start).format('YYYY-MM-DD');
-
-          all['Impressions'].push({
-            total: current.totalShareStatistics.impressionCount || 0,
-            date: dateStr,
-          });
-
-          all['Unique Impressions'].push({
-            total: current.totalShareStatistics.uniqueImpressionsCount || 0,
-            date: dateStr,
-          });
-
-          all['Clicks'].push({
-            total: current.totalShareStatistics.clickCount || 0,
-            date: dateStr,
-          });
-
-          all['Likes'].push({
-            total: current.totalShareStatistics.likeCount || 0,
-            date: dateStr,
-          });
-
-          all['Comments'].push({
-            total: current.totalShareStatistics.commentCount || 0,
-            date: dateStr,
-          });
-
-          all['Shares'].push({
-            total: current.totalShareStatistics.shareCount || 0,
-            date: dateStr,
-          });
-
-          all['Engagement'].push({
-            total: current.totalShareStatistics.engagement || 0,
-            date: dateStr,
-          });
-        }
-        return all;
-      },
-      {
-        Impressions: [] as { total: number; date: string }[],
-        'Unique Impressions': [] as { total: number; date: string }[],
-        Clicks: [] as { total: number; date: string }[],
-        Likes: [] as { total: number; date: string }[],
-        Comments: [] as { total: number; date: string }[],
-        Shares: [] as { total: number; date: string }[],
-        Engagement: [] as { total: number; date: string }[],
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        'LinkedIn-Version': '202601',
+        'X-Restli-Protocol-Version': '2.0.0',
+      };
+      // This query returns lifetime aggregates, never daily increments to sum.
+      const response = await fetch(
+        `https://api.linkedin.com/v2/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(`urn:li:organization:${integrationId}`)}&shares=List(${encodeURIComponent(postId)})`,
+        { headers }
+      );
+      if (!response.ok) return [];
+      const statistics: unknown = await response.json();
+      if (!analyticsBody(statistics) || !Array.isArray(statistics.elements)) return [];
+      let social: unknown;
+      // Do not hide conflicting/invalid snapshots by falling back to other counters.
+      if (statistics.elements.length === 0) {
+        try {
+          const socialResponse = await fetch(
+            `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(postId)}`, { headers }
+          );
+          if (socialResponse.ok) social = await socialResponse.json();
+        } catch { /* Optional social actions cannot fabricate missing statistics. */ }
       }
-    );
-
-    // If no time series data but we have social actions, create a single data point
-    if (
-      Object.values(analytics).every((arr) => arr.length === 0) &&
-      socialActions
-    ) {
-      const today = dayjs().format('YYYY-MM-DD');
-      analytics['Likes'].push({
-        total: socialActions.likesSummary?.totalLikes || 0,
-        date: today,
-      });
-      analytics['Comments'].push({
-        total: socialActions.commentsSummary?.totalFirstLevelComments || 0,
-        date: today,
-      });
+      return linkedinPostAnalytics(statistics, social, dayjs().format('YYYY-MM-DD'), integrationId, postId, context);
+    } catch {
+      console.warn('LinkedIn Page post analytics unavailable.');
+      return [];
     }
-
-    // Filter out empty analytics
-    const result = Object.entries(analytics)
-      .filter(([_, data]) => data.length > 0)
-      .map(([label, data]) => ({
-        label,
-        data,
-        percentageChange: 0,
-      }));
-
-    return result as any;
   }
 
   @Plug({

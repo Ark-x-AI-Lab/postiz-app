@@ -1,6 +1,6 @@
 # Ark-x Coolify candidate — v2.25.3
 
-Status: GitHub-built commit image candidate. The first server source build passed but startup failed on a generated environment-file path; root-path regression checks now pass. A coherent backup and isolated database restore passed. The rebuilt image passes offline tools and the database-only upgrade/idempotence/backup-restoration rehearsal. Stack readiness and live migration remain unproven. Source: `a5affe62c74e39c1e7ac960d50d8418b807d532c`, branch `deploy/arkx`.
+Status — 6 November 2026: source efa822c4c81b7871ea8f50bd02868f8a713dccbf is live at postiz.arkx.group. Three neutral test accounts published the approved scheduled post. The old service was retired with original volumes and recovery backup preserved. Automatic deploy remains disabled. The detailed candidate/rehearsal notes below are historical preparation evidence, not the current cutover status. New checked-analytics source is local and awaits reviewed image build/deployment.
 
 ## Files and choices
 

@@ -1,6 +1,6 @@
 # Postiz for Social Studio
 
-Status: fork prepared; replacement deployment and migration in progress. The existing publisher remains live.
+Status — 6 November 2026: the GitHub-built v2.25.3 replacement is live at postiz.arkx.group. The old service is retired with its original volumes and recovery backup retained. Checked post-analytics changes below are local and not deployed.
 
 ## Purpose
 
@@ -10,9 +10,9 @@ Social Studio is where the team creates and approves content. Postiz is the publ
 
 - Upstream: gitroomhq/postiz-app; deployment baseline v2.25.3.
 - Our repository: Ark-x-AI-Lab/postiz-app; deployment branch deploy/arkx.
-- Existing live service: postiz.arkx.group, still upstream v2.10.1.
-- Facebook and the new Instagram test account are connected in the existing service. LinkedIn connection is incomplete. No three-network test post has been published.
-- Fork creation does not establish upgrade compatibility or fix LinkedIn.
+- Live source: efa822c4c81b7871ea8f50bd02868f8a713dccbf, v2.25.3; immutable commit image.
+- Facebook, Instagram and LinkedIn test accounts are connected. One approved neutral scheduled post was published to all three; independent native reads matched caption, author and image.
+- LinkedIn token exchange was repaired by correcting the existing app secret in persistent runtime configuration. No new app or expanded permission was needed for that repair.
 
 ## What must survive migration
 
@@ -26,11 +26,11 @@ Local branch → reviewed commit → GitHub deploy/arkx → Coolify GitHub App �
 
 - [x] Fork exists in the correct organization and local clone has upstream remote.
 - [x] Deployment definitions, startup guards, schema validation and isolated GitHub source build pass.
-- [x] Coolify GitHub App connected to deploy/arkx; candidate has no public domain and automatic deployment stays disabled until migration passes. Private infrastructure exists; no replacement publisher is active.
-- [ ] Isolated migration rehearsal succeeds with real sending disabled.
-- [ ] Backup restoration and old-version rollback are demonstrated.
-- [ ] Live cutover preserves authentication, workspace, integrations and files.
-- [ ] Old service retired after independent replacement checks.
+- [x] Coolify GitHub App connected to deploy/arkx; explicit deployment uses the commit-tagged image. Automatic deployment remains disabled; the replacement owns the public domain.
+- [x] Isolated migration rehearsal passed with real sending disabled.
+- [x] Independent database, Redis and media restoration plus old-image API recovery passed; a full old-version user-interface rollback was not exercised.
+- [x] Live cutover preserved the original values across45tables; the upgraded schema has88tables. Redis7keys and3media files matched.
+- [x] Old service retired after independent replacement checks; original4volumes retained.
 
 ## Scope
 
@@ -38,11 +38,11 @@ No advertising, public posting, provider permission expansion or new paid infras
 
 See [architecture](architecture.md), [migration plan](../plans/coolify-migration.md) and [deployment decision](decisions/001-github-maintained-publisher.md).
 
-Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. Live migration has not occurred. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.
+Build evidence: [source image and private-context checks](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42143668712), plus the upstream Build workflow, passed for commit 4235e774679e38c611b5a856fb553f7760c01690. That build was pre-cutover evidence; the later Efa source is live. Necessary legacy signing/OAuth configuration was transferred directly to runtime-only Coolify fields and compared exactly; no values entered Git.
 
 ## Deployment delivery
 
-The maintained fork builds its commit-tagged image in GitHub Actions and Coolify pulls that exact image. Production keys are runtime-only. The image must pass an offline, read-only Prisma tool check before publication. The existing publisher remains live while database upgrade, recovery and replacement readiness are tested.
+The maintained fork builds its commit-tagged image in GitHub Actions and Coolify pulls that exact image. Production keys are runtime-only. The image must pass an offline, read-only Prisma tool check before publication. The replacement is live; archived rehearsal evidence below describes the pre-cutover checks.
 
 The private registry login is separate from the shared server login. Provider credentials belong to the publisher’s declared environment; infrastructure does not inherit the publisher’s global environment file. Default deployment startup continues to exclude the publisher until its explicit activation step.
 
@@ -61,3 +61,7 @@ Capacity recovery removed the owner-selected obsolete artifacts and inactive bui
 The maintained connector includes temporary, opt-in stage diagnostics for connect, callback, token exchange, scope checks, profile reads, Page discovery and Page saving. A random reference links safe browser/API/backend events. Logged fields are closed and exclude raw credentials, authorization state/codes, user/Page identifiers and response bodies. The flag defaults off; enabled runtime collection and the deployed pinned build still need acceptance. The21-test diagnostics harness passed offline with the pinned Node22/TypeScript5.5 image, including overlapping Page selections and invalid bindings. This does not itself establish or repair the live LinkedIn failure.
 
 Recovery evidence: the old publisher image also booted against the independent restored old-schema database and a fresh Redis instance loaded from the verified RDB; its5 API checks pass. Configuration and uploads restored to fresh test volumes match every saved file name/content hash (0 config files,3 upload files; archive directories counted separately). A synthetic value encrypted by the actual old helper decrypts with the actual new helper under the preserved secret. No real integration token was read for that check. This is still not an independently verified full UI rollback or live cutover.
+
+## Checked per-post audience measurements — local change
+
+The analytics response keeps its bare array shape and adds optional metric identity, lifetime basis and explicit-count provenance for reviewed saved single-image dispatch paths. Missing or invalid counts are omitted rather than replaced with zeros. Facebook reach, reactions and clicks remain distinct; LinkedIn error-shaped or missing counters cannot become zero. Unknown/video/story/personal-profile formats do not gain provenance. Studio requires these fields before ingesting measurements. Focused source fixtures passed; pinned image build, deployment and live acceptance remain open.

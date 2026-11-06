@@ -1,5 +1,6 @@
 import {
   AnalyticsData,
+  PostAnalyticsContext,
   AuthTokenDetails,
   PendingCheckResponse,
   PostDetails,
@@ -7,6 +8,7 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { metaPostAnalytics } from '../post-analytics';
 import dayjs from 'dayjs';
 import {
   BadBody,
@@ -1087,90 +1089,20 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     integrationId: string,
     accessToken: string,
     postId: string,
-    date: number
+    date: number,
+    context?: PostAnalyticsContext
   ): Promise<AnalyticsData[]> {
     const today = dayjs().format('YYYY-MM-DD');
-
-    // The stored id (releaseId) shape depends on the post type set in post():
-    //   - feed post  -> `{pageid}_{postid}` (contains `_`), has an `insights` edge
-    //   - reel/video -> bare numeric video id, NO `insights` edge (only `video_insights`)
-    //   - story      -> bare story id, no usable insights via this path
-    // There is no separate stored type, so id shape is the discriminator. Calling
-    // `/{videoId}/insights` on a video/story node returns
-    // `(#100) Tried accessing nonexisting field (insights)`, which is what surfaced
-    // in prod as "Error fetching Facebook post analytics: ApplicationFailure". Route
-    // bare ids to the video-only edge instead.
-    if (!postId.includes('_')) {
-      return this.videoPostAnalytics(accessToken, postId, today);
-    }
-
+    // Bare video/story identifiers retain their legacy, unproven analytics path.
+    if (!postId.includes('_')) return this.videoPostAnalytics(accessToken, postId, today);
     try {
-      // Fetch post insights from Facebook Graph API.
-      // post_impressions_unique was deprecated by Meta on 2026-06-15; it is replaced
-      // by post_total_media_view_unique (unique media views = reach), available on
-      // Graph API v23.0+. Engagement metrics below are unaffected.
-      const { data } = await (
-        await fetch(
-          `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${postId}/insights?metric=post_total_media_view_unique,post_reactions_by_type_total,post_clicks,post_clicks_by_type&access_token=${accessToken}`
-        )
-      ).json();
-
-      if (!data || data.length === 0) {
-        return [];
-      }
-
-      const result: AnalyticsData[] = [];
-
-      for (const metric of data) {
-        const value = metric.values?.[0]?.value;
-        if (value === undefined) continue;
-
-        let label = '';
-        let total = '';
-
-        switch (metric.name) {
-          case 'post_total_media_view_unique':
-            label = 'Impressions';
-            total = String(value);
-            break;
-          case 'post_clicks':
-            label = 'Clicks';
-            total = String(value);
-            break;
-          case 'post_clicks_by_type':
-            // This returns an object with click types
-            if (typeof value === 'object') {
-              const totalClicks = Object.values(
-                value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
-              label = 'Clicks by Type';
-              total = String(totalClicks);
-            }
-            break;
-          case 'post_reactions_by_type_total':
-            // This returns an object with reaction types
-            if (typeof value === 'object') {
-              const totalReactions = Object.values(
-                value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
-              label = 'Reactions';
-              total = String(totalReactions);
-            }
-            break;
-        }
-
-        if (label) {
-          result.push({
-            label,
-            percentageChange: 0,
-            data: [{ total, date: today }],
-          });
-        }
-      }
-
-      return result;
-    } catch (err) {
-      console.error('Error fetching Facebook post analytics:', err);
+      const response = await fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${postId}/insights?metric=post_total_media_view_unique,post_reactions_by_type_total,post_clicks,post_clicks_by_type&access_token=${accessToken}`
+      );
+      if (!response.ok) return [];
+      return metaPostAnalytics(await response.json(), 'facebook', today, context);
+    } catch {
+      console.warn('Facebook post analytics unavailable.');
       return [];
     }
   }
@@ -1214,10 +1146,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       // not a scary error) so it's diagnosable without breaking the statistics page.
       if (error || !data || data.length === 0) {
         if (error && !/nonexisting field/i.test(error.message || '')) {
-          console.warn('Facebook video_insights returned an error:', {
-            videoId,
-            error,
-          });
+          console.warn('Facebook video analytics unavailable.');
         }
         return [];
       }
@@ -1273,8 +1202,8 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       }
 
       return result;
-    } catch (err) {
-      console.error('Error fetching Facebook video post analytics:', err);
+    } catch {
+      console.warn('Facebook video analytics unavailable.');
       return [];
     }
   }

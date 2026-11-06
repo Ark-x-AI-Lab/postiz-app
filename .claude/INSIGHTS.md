@@ -13,3 +13,5 @@
 
 - Correlating Page-save diagnostics by an intermediate integration ID mixes two tabs that upsert the same member. Preserve a per-attempt server-validated binding through the picker; keep it independent of dashboard lookup and authorization. Regression must use two callbacks sharing one integration.
 - Offline TypeScript transpilation on the laptop is not the pinned-runtime build. Run diagnostic safety tests inside the actual Node22/TypeScript5.5 image with source overlays or the built commit image, network disabled and a read-only filesystem.
+
+- Post analytics receive no inherent media-format proof from a native post ID. Carry optional saved dispatch context from the org-scoped Post lookup through the provider interface and standalone delegation; unknown media/settings remain unproven. Validate explicit counter presence before attaching provenance; a missing LinkedIn total is not zero.

@@ -2,6 +2,7 @@ import {
   AuthTokenDetails,
   PostDetails,
   PostResponse,
+  PostAnalyticsContext,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
@@ -263,13 +264,15 @@ export class InstagramStandaloneProvider
     integrationId: string,
     accessToken: string,
     postId: string,
-    date: number
+    date: number,
+    context?: PostAnalyticsContext
   ) {
     return instagramProvider.postAnalytics(
       integrationId,
       accessToken,
       postId,
       date,
+      context,
       'graph.instagram.com'
     );
   }

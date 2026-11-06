@@ -35,6 +35,7 @@ export interface IAuthenticator {
     accessToken: string,
     postId: string,
     fromDate: number,
+    context?: PostAnalyticsContext,
   ): Promise<AnalyticsData[]>;
   resolveReleaseId?(
     accessToken: string,
@@ -73,8 +74,16 @@ export interface AnalyticsData {
   label: string;
   data: Array<{ total: string; date: string }>;
   percentageChange: number;
+  metricKey?: 'reach' | 'likes' | 'comments' | 'shares' | 'impressions' | 'reactions' | 'clicks' | 'clicksByType' | 'views' | 'saves' | 'uniqueImpressions';
+  measurementBasis?: 'lifetime';
+  provenance?: 'explicit';
 }
 
+/** Internal context derived from saved Post media/settings, never a public query. */
+export interface PostAnalyticsContext {
+  mediaKind: 'single-image';
+  provider: 'facebook' | 'instagram' | 'instagram-standalone' | 'linkedin-page';
+}
 
 export type GenerateAuthUrlResponse = {
   url: string;

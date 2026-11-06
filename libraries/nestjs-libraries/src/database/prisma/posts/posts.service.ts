@@ -46,6 +46,7 @@ import {
   postId as postIdSearchParam,
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { AnalyticsData } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { savedPostAnalyticsContext } from '@gitroom/nestjs-libraries/integrations/post-analytics';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
@@ -372,7 +373,8 @@ export class PostsService {
         getIntegration.internalId,
         getIntegration.token,
         releaseId,
-        date
+        date,
+        savedPostAnalyticsContext(post, getIntegration.providerIdentifier)
       );
       await ioRedis.set(
         `integration:${orgId}:${post.id}:${date}`,
