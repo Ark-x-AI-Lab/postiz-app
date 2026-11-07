@@ -113,3 +113,9 @@ The local [cache plan](../../plans/publisher-build-cache.md) separates locked pa
 ## Native graphics acceptance
 
 The source approval list adds only `canvas` alongside `bcrypt`; dependency versions remain locked. After frozen offline install, the recipe explicitly runs `pnpm rebuild bcrypt canvas --store-dir=/pnpm/store`: the pinned fixture confirmed that this respects approval and avoids replaying project hooks, unlike relying on install exit0 alone. The final-image `native-runtime.test.cjs` gate runs offline and unprivileged before publication, checking the actual PNG renderer, crypto module, sanitizer and installed DOM parsers. The old D7 image has a confirmed missing canvas binding; it is not an expected passing fixture. Source `46d20f2929679c4db740b1f8b20b20be0bf8173c` passed the repaired-image gate in [run 42301401305](https://github.com/Ark-x-AI-Lab/postiz-app/actions/runs/42301401305):159 tests passed, none failed or skipped. Canvas rendered successfully without adding system libraries. The commit image was published; production remains on D7. Live login/layout and ordinary editorial posting remain separate checks.
+
+### Read-only workflow state
+
+`workflow-state.cjs` runs inside the existing publisher with its configured Temporal client. It lists at most 100 running workflows and describes pending activity types/states without fetching workflow inputs, results or history payloads. Workflow identities are hashed; malformed, truncated or timed-out responses return an unavailable result rather than a partial count. It never starts, signals, cancels or replays a workflow.
+
+Run its offline regression suite with `node --test deploy/arkx/workflow-state.test.cjs`. Before using its output for a restart decision, inspect the corresponding workflow source: zero pending activities does not exclude queued signals, durable timers or later notification sends. Preserve the Temporal volumes and verify recovery separately.
