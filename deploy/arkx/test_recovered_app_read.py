@@ -159,11 +159,11 @@ class Tests(unittest.TestCase):
         plan=m.app_plan(args());self.assertFalse(plan['ready']);self.assertEqual(plan['source'],m.APP_SOURCE)
         self.assertEqual(plan['count_baseline']['counts'],{'users':1,'organizations':1,'integrations':3,'media':1,'posts':3})
         self.assertTrue(all('current-restore-extraction' not in k or 'restore-epochs/20261107g/' in k for k in plan['input_pins']))
-        self.assertEqual(plan['memory_admission_bytes'],3087007744)
+        self.assertEqual(plan['memory_admission_bytes'],2885681152)
     def test_02_memory_and_disk_exact_admission(self):
-        m.app_admit(3087007744,3*1024**3,1024**3)
+        m.app_admit(2885681152,3*1024**3,1024**3)
         m.app_admit(3288936448,23616917504,1024**3)
-        self.refused(lambda:m.app_admit(3087007743,23616917504))
+        self.refused(lambda:m.app_admit(2885681151,23616917504))
         self.refused(lambda:m.app_admit(3288936448,3*1024**3-1,1024**3))
     def test_03_current_family_and_counts_not_old_defaults(self):
         for changed in [{'target':'/var/lib/arkx-current-restore/arkx-current-restore-20261107'+x} for x in 'abcdefghi']+[{'target':'/var/lib/arkx-current-restore/../escape'},{'counts':{**family()['counts'],'Integration':2}},{'counts':{**family()['counts'],'Media':0}},{'counts':{**family()['counts'],'Post':0}},{'counts':{**family()['counts'],'queued':1}},{'temporal_entrypoint':'/etc/temporal/auto-setup.sh'},{'extra':True}]:
@@ -698,6 +698,74 @@ setTimeout(()=>{try{process.stdout.write(JSON.stringify({output:JSON.parse(outpu
         with self.assertRaises(m.Refusal) as caught:self.execute(r,st,checked=True)
         self.assertNotIn(marker,str(caught.exception));self.assertTrue(all(not v['State']['Running'] for v in d.rows.values()))
         self.assertTrue(all(r.stopped.values()));self.assertFalse(any(v.get('state')=='refused' for v in r.events))
+
+
+    def test_45_tighter_caps_bind_plan_create_and_exact_container_guards(self):
+        plan=m.app_plan(args())
+        self.assertEqual(plan['memory_mib'],{'pg14':160,'pg16':160,'redis':64,'es':640,'temporal':256,'backend':384,'probe':64})
+        self.assertEqual(sum(plan['memory_mib'].values()),1728);self.assertEqual(plan['memory_reserve_bytes'],1073741824)
+        self.assertEqual((1728+1024)*1024**2,2885681152);self.assertEqual(plan['memory_admission_bytes'],2885681152)
+        m.app_admit(2885681152,3*1024**3,1024**3);self.refused(lambda:m.app_admit(2885681151,3*1024**3,1024**3))
+        m.app_admit(3055439872,3*1024**3,1024**3)  # l's supplied count now clears only this numerical admission
+        r,d,st=self.driver();self.execute(r,st)
+        for role,new,old in [('pg14',160,192),('pg16',160,192),('es',640,768)]:
+            h=d.rows[r.ids[role]]['HostConfig'];self.assertEqual(h['Memory'],new*1024**2);self.assertEqual(h['MemorySwap'],new*1024**2);r.guard(role)
+            for wrong in (old*1024**2,new*1024**2-1,new*1024**2+1):
+                with self.subTest(role=role,wrong=wrong):
+                    h['Memory']=h['MemorySwap']=wrong;self.refused(lambda:r.guard(role))
+            h['Memory']=h['MemorySwap']=new*1024**2;r.guard(role)
+        for role in ('pg14','pg16'):
+            self.assertIn('shared_buffers=16MB',r.specs[role]['args']);self.assertIn('max_connections=30',r.specs[role]['args'])
+    def test_46_tighter_cgroup_max_accepts_exact_and_refuses_old_or_wrong_caps(self):
+        for role,new,old in [('pg14',160,192),('pg16',160,192),('es',640,768)]:
+            with self.subTest(role=role),self.memory_fixture(role=role) as f:
+                self.assertEqual((f.cg/'memory.max').read_text().strip(),str(new*1024**2))
+                m.AppRead.capacity(f.r)
+                for wrong in (old*1024**2,new*1024**2-1,new*1024**2+1):
+                    (f.cg/'memory.max').write_text(str(wrong)+'\n');self.refused(lambda:m.AppRead.capacity(f.r))
+                (f.cg/'memory.max').write_text(str(new*1024**2)+'\n');m.AppRead.capacity(f.r)
+
+
+    @contextlib.contextmanager
+    def readiness_fixture(self,role,response):
+        r,d,st=self.driver();self.execute(r,st);r.events=[]
+        d.rows[r.ids[role]]['State'].update(Running=True,Status='running',Pid=4321)
+        clock=types.SimpleNamespace(now=0.0,calls=[]);original=d.__call__
+        def call(a,**kw):
+            if a[:2]==['container','exec']:
+                self.assertEqual(a[2],r.ids[role]);self.assertTrue(kw['allow_failure']);self.assertGreater(kw['timeout'],0);self.assertLessEqual(kw['timeout'],4)
+                clock.calls.append((clock.now,kw['timeout']));clock.now+=min(.5,kw['timeout'])
+                return response(clock.now)
+            return original(a,**kw)
+        def sleep(seconds):self.assertGreaterEqual(seconds,0);clock.now+=seconds
+        r.call=call
+        with patch.object(m.time,'monotonic',side_effect=lambda:clock.now),patch.object(m.time,'sleep',side_effect=sleep):yield r,clock
+    def test_47_es_delayed_healthy_after_30_before_120_is_accepted_and_safely_timed(self):
+        for healthy in ('green','yellow'):
+            with self.subTest(healthy=healthy),self.readiness_fixture('es',lambda seconds:m.app_canonical({'status':healthy if seconds>45 else 'red','timed_out':False})) as (r,clock):
+                r.ready('es');self.assertGreater(clock.now,30);self.assertLess(clock.now,120)
+                self.assertEqual(len(r.events),1);event=r.events[0]
+                self.assertEqual(set(event),{'state','elapsed_ms'});self.assertEqual(event['state'],'es-ready')
+                self.assertEqual(event['elapsed_ms'],int(clock.now*1000));self.assertGreater(event['elapsed_ms'],30000)
+    def test_48_es_red_or_timed_out_never_accept_and_stop_at_120(self):
+        for status,timed in [('red',False),('green',True),('yellow',True)]:
+            with self.subTest(status=status,timed=timed),self.readiness_fixture('es',lambda _,s=status,t=timed:m.app_canonical({'status':s,'timed_out':t})) as (r,clock):
+                with self.assertRaises(m.Refusal):r.ready('es')
+                self.assertEqual(clock.now,120);self.assertFalse(r.events)
+                self.assertTrue(all(start<120 and start+timeout<=120 for start,timeout in clock.calls))
+        with self.readiness_fixture('es',lambda seconds:m.app_canonical({'status':'green' if seconds>=120 else 'red','timed_out':False})) as (r,clock):
+            with self.assertRaises(m.Refusal):r.ready('es')
+            self.assertEqual(clock.now,120);self.assertFalse(r.events)  # even a healthy response at the deadline is too late
+    def test_49_other_readiness_roles_keep_30_second_window(self):
+        for role in ('pg14','pg16','redis','backend'):
+            with self.subTest(role=role),self.readiness_fixture(role,lambda _:b'') as (r,clock):
+                with self.assertRaises(m.Refusal):r.ready(role)
+                self.assertEqual(clock.now,30);self.assertFalse(r.events)
+                self.assertTrue(all(start<30 and start+timeout<=30 for start,timeout in clock.calls))
+    def test_50_malformed_es_health_refuses_without_ready_event(self):
+        for data in (b'not-json',b'[]',b'null',b'{}',b'{"status":"green","timed_out":"false"}',b'{"status":42,"timed_out":false}',b'{"status":"green","timed_out":0}'):
+            with self.subTest(shape=data[:20]),self.readiness_fixture('es',lambda _,value=data:value) as (r,clock):
+                self.refused(lambda:r.ready('es'));self.assertFalse(r.events);self.assertLess(clock.now,120)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

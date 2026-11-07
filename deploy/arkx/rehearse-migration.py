@@ -461,7 +461,7 @@ APP_STOCK_IMAGE_ENV = {
 APP_CHECKS = {"check-backend.cjs": "106c1ec25e8afd877bc24b25d038e7f2a510312a5cd607fa8f6295cdf131f6cd",
               "check-temporal.cjs": "a4350c3097ef0c6bdf3b66dd3de01ce04fcf25fba7ba2b560363b314d626777b"}
 APP_ROLES = ("pg14", "pg16", "redis", "es", "temporal", "backend")
-APP_LIMITS = dict(zip(APP_ROLES + ("probe",), (192, 192, 64, 768, 256, 384, 64)))
+APP_LIMITS = dict(zip(APP_ROLES + ("probe",), (160, 160, 64, 640, 256, 384, 64)))
 APP_RESERVE, APP_DISK = 1024**3, 2*1024**3
 APP_REQUIRED_MEMORY = sum(APP_LIMITS.values()) * 1024**2 + APP_RESERVE
 APP_LABEL = "group.arkx.recovered-app-read"
@@ -1067,17 +1067,24 @@ class AppRead:
         elif role == "redis": argv=["redis-cli","ping"]
         elif role == "es": argv=["curl","-fsS","--max-time","2","http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s"]
         else: argv=["node","-e","fetch('http://127.0.0.1:3000/auth/can-register',{signal:AbortSignal.timeout(1000)}).then(r=>{if(r.status===200)process.stdout.write('APP_READY');else process.exitCode=1}).catch(()=>process.exitCode=1)"]
-        deadline=time.monotonic()+30
+        started=time.monotonic();budget=120 if role=="es" else 30;deadline=started+budget
         while time.monotonic()<deadline:
             self.check_cancel(); self.guard(role)
-            out=self.call(["container","exec",self.ids[role]]+argv,timeout=4,allow_failure=True)
+            remaining=deadline-time.monotonic()
+            if remaining<=0:break
+            out=self.call(["container","exec",self.ids[role]]+argv,timeout=min(4,remaining),allow_failure=True)
+            now=time.monotonic()
+            if now>=deadline:break
             if role in ("pg14","pg16") and b"accepting connections" in out: return
             if role == "redis" and out.strip()==b"PONG": return
             if role == "es" and out:
                 v=app_json(out)
-                if v.get("status") in ("green","yellow") and v.get("timed_out") is False: return
+                app_need(isinstance(v,dict) and v.get("status") in ("green","yellow","red") and type(v.get("timed_out")) is bool)
+                if v.get("status") in ("green","yellow") and v.get("timed_out") is False:
+                    elapsed=now-started;app_need(0<=elapsed<budget)
+                    self.event({"state":"es-ready","elapsed_ms":int(elapsed*1000)});return
             if role == "backend" and out==b"APP_READY": return
-            time.sleep(.25)
+            time.sleep(min(.25,max(0,deadline-time.monotonic())))
         raise Refusal("App-read readiness failed; exact resources retained")
 
     def process_guard(self, role):
